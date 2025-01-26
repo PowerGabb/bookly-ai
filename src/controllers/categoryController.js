@@ -75,4 +75,14 @@ export const updateCategory = async (req, res) => {
     }
 }
 
+export const getCategoryById = async (req, res) => {
+    const { id } = req.params;
+    const idInt = parseInt(id);
+    try {
+        const category = await prisma.category.findUnique({ where: { id: idInt } });
+        return successResponse(res, "Category fetched successfully", 200, category);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
 

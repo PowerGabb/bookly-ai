@@ -13,6 +13,7 @@ export const isAuth = async (req, res, next) => {
             return errorResponse(res, 'Invalid token', 401);
         }
 
+
         const user = await prisma.user.findUnique({
             where: {
                 id: decoded.id,
