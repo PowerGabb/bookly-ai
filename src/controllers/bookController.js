@@ -9,30 +9,49 @@ import Tesseract from "tesseract.js";
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const createBook = async (req, res) => {
-    const { title, author, description, categoryIds } = req.body;
+    const { 
+        title, 
+        author, 
+        description, 
+        isbn,
+        publisher,
+        publicationYear,
+        language,
+        pageCount,
+        categoryIds 
+    } = req.body;
 
-    if (!req.file) {
-        return errorResponse(res, "No file uploaded", 400);
+    console.log(req.files);
+
+    if (!req.files || !req.files.bookFile) {
+        return errorResponse(res, "File buku harus diunggah", 400);
     }
 
-    if (req.file.mimetype !== "application/pdf" && req.file.mimetype !== "application/epub+zip") {
-        return errorResponse(res, "Invalid file type. Only PDF and EPUB files are allowed", 400);
+    const bookFile = req.files.bookFile[0];
+    const coverFile = req.files.coverImage ? req.files.coverImage[0] : null;
+
+    if (bookFile.mimetype !== "application/pdf" && bookFile.mimetype !== "application/epub+zip") {
+        return errorResponse(res, "Tipe file tidak valid. Hanya file PDF dan EPUB yang diizinkan", 400);
     }
 
     try {
-        const findBook = await prisma.book.findUnique({
+        // Cek buku yang sudah ada berdasarkan title atau ISBN
+        const existingBook = await prisma.book.findFirst({
             where: {
-                title: title
+                OR: [
+                    { title: title },
+                    { isbn: isbn }
+                ]
             }
         });
 
-        if (findBook) {
-            return errorResponse(res, "Book already exists", 400);
+        if (existingBook) {
+            return errorResponse(res, "Buku dengan judul atau ISBN yang sama sudah ada", 400);
         }
 
-        // Menentukan path baru dengan mempertahankan ekstensi file
-        const fileExtension = path.extname(req.file.originalname);
-        const newFileName = `${req.file.filename}${fileExtension}`;
+        // Proses file buku
+        const fileExtension = path.extname(bookFile.originalname);
+        const newFileName = `${bookFile.filename}${fileExtension}`;
         const uploadDir = path.join("uploads", "waiting-process");
         const newFilePath = path.join(uploadDir, newFileName);
 
@@ -41,14 +60,30 @@ export const createBook = async (req, res) => {
             fs.mkdirSync(uploadDir, { recursive: true });
         }
 
-        // Pindahkan file ke direktori baru dengan nama yang benar
-        fs.renameSync(req.file.path, newFilePath);
+        // Pindahkan file buku
+        fs.renameSync(bookFile.path, newFilePath);
+
+        // Proses cover image jika ada
+        let coverImagePath = null;
+        if (coverFile) {
+            const coverDir = path.join("uploads", "covers");
+            if (!fs.existsSync(coverDir)) {
+                fs.mkdirSync(coverDir, { recursive: true });
+            }
+            coverImagePath = `/uploads/covers/${coverFile.filename}`;
+        }
 
         const book = await prisma.book.create({
             data: {
-                title: title,
-                author: author,
-                description: description,
+                title,
+                author,
+                description,
+                isbn,
+                publisher,
+                publicationYear: publicationYear ? parseInt(publicationYear) : null,
+                language,
+                pageCount: pageCount ? parseInt(pageCount) : null,
+                coverImage: coverImagePath,
                 file_url: `/uploads/waiting-process/${newFileName}`,
                 ...(categoryIds && categoryIds.length > 0 ? {
                     categories: {
@@ -90,23 +125,52 @@ export const createBook = async (req, res) => {
 
 export const updateBook = async (req, res) => {
     const { bookId } = req.params;
-    const { title, author, description, categoryIds } = req.body;
+    const { 
+        title, 
+        author, 
+        description, 
+        isbn,
+        publisher,
+        publicationYear,
+        language,
+        pageCount,
+        categoryIds 
+    } = req.body;
 
     try {
-        // Cari buku yang akan diupdate
         const existingBook = await prisma.book.findUnique({
             where: { id: parseInt(bookId) }
         });
 
         if (!existingBook) {
-            return errorResponse(res, "Book not found", 404);
+            return errorResponse(res, "Buku tidak ditemukan", 404);
         }
 
-        // Persiapkan data update
+        // Handle cover image update
+        let coverImagePath = existingBook.coverImage;
+        if (req.files && req.files.coverImage) {
+            // Hapus cover lama jika ada
+            if (existingBook.coverImage) {
+                const oldCoverPath = path.join(process.cwd(), existingBook.coverImage);
+                if (fs.existsSync(oldCoverPath)) {
+                    fs.unlinkSync(oldCoverPath);
+                }
+            }
+            
+            // Set path cover baru
+            coverImagePath = `/uploads/covers/${req.files.coverImage[0].filename}`;
+        }
+
         let updateData = {
             title: title || existingBook.title,
             author: author || existingBook.author,
-            description: description || existingBook.description
+            description: description || existingBook.description,
+            isbn: isbn || existingBook.isbn,
+            publisher: publisher || existingBook.publisher,
+            publicationYear: publicationYear ? parseInt(publicationYear) : existingBook.publicationYear,
+            language: language || existingBook.language,
+            pageCount: pageCount ? parseInt(pageCount) : existingBook.pageCount,
+            coverImage: coverImagePath
         };
 
         // Update kategori hanya jika categoryIds dikirimkan dan memiliki nilai
@@ -130,12 +194,9 @@ export const updateBook = async (req, res) => {
             }
         }
 
-        // Jika ada file baru yang diupload
-        if (req.file) {
-            if (req.file.mimetype !== "application/pdf" && req.file.mimetype !== "application/epub+zip") {
-                return errorResponse(res, "Invalid file type. Only PDF and EPUB files are allowed", 400);
-            }
-
+        // Handle book file update
+        if (req.files && req.files.bookFile) {
+            const bookFile = req.files.bookFile[0];
             // Hapus file PDF lama jika masih ada
             if (existingBook.file_url) {
                 const oldPdfPath = path.join(process.cwd(), existingBook.file_url);
@@ -158,9 +219,8 @@ export const updateBook = async (req, res) => {
             });
 
             // Proses file baru
-            const fileExtension = path.extname(req.file.originalname);
-            const newFileName = `${req.file.filename}${fileExtension}`;
-            const uploadDir = path.join("uploads", "waiting-process");
+            const fileExtension = path.extname(bookFile.originalname);
+            const newFileName = `${bookFile.filename}${fileExtension}`;
             const newFilePath = path.join(uploadDir, newFileName);
 
             // Buat direktori jika belum ada
@@ -169,7 +229,7 @@ export const updateBook = async (req, res) => {
             }
 
             // Pindahkan file baru
-            fs.renameSync(req.file.path, newFilePath);
+            fs.renameSync(bookFile.path, newFilePath);
 
             // Tambahkan informasi file baru ke data update
             updateData = {
@@ -195,7 +255,7 @@ export const updateBook = async (req, res) => {
         });
 
         // Jika ada file baru dan itu PDF, mulai proses konversi
-        if (req.file && path.extname(req.file.originalname).toLowerCase() === '.pdf') {
+        if (req.files && req.files.bookFile && path.extname(req.files.bookFile[0].originalname).toLowerCase() === '.pdf') {
             setImmediate(() => {
                 processBookPages(updatedBook.id, updatedBook.title, path.join(uploadDir, newFileName));
             });

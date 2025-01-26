@@ -28,49 +28,55 @@ model User {
 }
 
 model Book {
-  id                 Int      @id @default(autoincrement())
-  title              String?  @unique
-  author             String?
-  description        String?
-  file_url           String?
-  processed          Boolean  @default(false)
-  processed_dir      String?
-  error_message      String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id              Int      @id @default(autoincrement())
+  title           String   @unique
+  author          String
+  description     String   @db.Text
+  isbn            String?  @unique // International Standard Book Number
+  publisher       String? // Penerbit buku
+  publicationYear Int? // Tahun terbit
+  language        String? // Bahasa buku
+  pageCount       Int? // Jumlah halaman
+  coverImage      String? // URL gambar sampul buku
+  file_url        String? // Tambahkan field ini
+  processed       Boolean  @default(false)
+  processed_dir   String?
+  error_message   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  pages              BookPage[]
-  categories         BookCategory[]
+  pages      BookPage[]
+  categories BookCategory[]
 }
 
 model BookPage {
-  id                 Int      @id @default(autoincrement())
-  book_id            Int
-  page_number        Int
-  image_url          String?
-  text               String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id          Int      @id @default(autoincrement())
+  book_id     Int
+  page_number Int
+  image_url   String?
+  text        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  book               Book     @relation(fields: [book_id], references: [id], onDelete: Cascade)
+  book Book @relation(fields: [book_id], references: [id], onDelete: Cascade)
 }
 
 model Category {
-  id                 Int      @id @default(autoincrement())
-  name               String?  @unique
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  books              BookCategory[]
+  books BookCategory[]
 }
 
 model BookCategory {
-  id                 Int      @id @default(autoincrement())
-  book_id            Int
-  category_id        Int
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id          Int      @id @default(autoincrement())
+  book_id     Int
+  category_id Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  book               Book     @relation(fields: [book_id], references: [id], onDelete: Cascade)
-  category           Category @relation(fields: [category_id], references: [id], onDelete: Cascade)
+  book     Book     @relation(fields: [book_id], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [category_id], references: [id], onDelete: Cascade)
 }
