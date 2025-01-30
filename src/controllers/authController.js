@@ -6,7 +6,6 @@ import prisma from "../utils/prisma.js";
 import { successResponse } from "../libs/successResponse.js";
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../libs/jwt.js";
 import { sendEmail } from "../libs/nodemailer.js";
-import crypto from "crypto";
 
 export const register = async (req, res) => {
     const validation = requestValidation(registerValidation, req);
@@ -25,7 +24,8 @@ export const register = async (req, res) => {
             return errorResponse(res, "Email already exists", 400);
         }
 
-        const activationToken = crypto.randomBytes(32).toString('hex');
+        // Generate 6 digit activation token
+        const activationToken = Math.floor(100000 + Math.random() * 900000).toString();
         const hashedPassword = await hashPassword(req.body.password);
         const newUser = await prisma.user.create({
             data: {
@@ -36,23 +36,22 @@ export const register = async (req, res) => {
             }
         });
 
-        // Kirim email aktivasi
-        const activationLink = `${process.env.FRONTEND_URL}/activate/${activationToken}`;
+        // Kirim email dengan kode aktivasi
         const emailContent = `
             <h1>Aktivasi Akun Anda</h1>
             <p>Halo ${newUser.name},</p>
-            <p>Terima kasih telah mendaftar. Silakan klik link di bawah ini untuk mengaktifkan akun Anda:</p>
-            <a href="${activationLink}">Aktivasi Akun</a>
-            <p>Link ini akan kadaluarsa dalam 24 jam.</p>
+            <p>Terima kasih telah mendaftar. Berikut adalah kode aktivasi akun Anda:</p>
+            <h2>${activationToken}</h2>
+            <p>Kode ini akan kadaluarsa dalam 24 jam.</p>
         `;
 
         await sendEmail(
             newUser.email,
-            "Aktivasi Akun Anda",
+            "Kode Aktivasi Akun Anda",
             emailContent
         );
 
-        return successResponse(res, "Register success, please check your email for activation", 200, {
+        return successResponse(res, "Register berhasil, silakan cek email Anda untuk kode aktivasi", 200, {
             id: newUser.id,
             name: newUser.name,
             email: newUser.email,
@@ -70,7 +69,7 @@ export const register = async (req, res) => {
 };
 
 export const activate = async (req, res) => {
-    const { token } = req.params;
+    const { token } = req.body;
 
     try {
         const user = await prisma.user.findUnique({
@@ -80,7 +79,7 @@ export const activate = async (req, res) => {
         });
 
         if (!user) {
-            return errorResponse(res, "Token aktivasi tidak valid atau sudah kadaluarsa", 400);
+            return errorResponse(res, "Kode aktivasi tidak valid atau sudah kadaluarsa", 400);
         }
 
         if (user.isActive) {

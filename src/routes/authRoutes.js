@@ -3,7 +3,7 @@ import { register, activate, login, refreshToken } from "../controllers/authCont
 const authRoutes = express.Router();
 
 authRoutes.post("/register", register);
-authRoutes.get("/activate/:token", activate);
+authRoutes.post("/activate", activate);
 authRoutes.post("/login", login);
 authRoutes.post("/refresh-token", refreshToken);
 
