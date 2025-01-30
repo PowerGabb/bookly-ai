@@ -27,7 +27,6 @@ model User {
   updatedAt          DateTime @updatedAt
 
   ratings    BookRating[]
-  comments   BookComment[]
   reads      BookRead[]
   saved      BookSaved[]
 }
@@ -52,7 +51,6 @@ model Book {
 
   pages      BookPage[]
   categories BookCategory[]
-  comments   BookComment[]
   ratings    BookRating[]
   reads      BookRead[]
   saved      BookSaved[]
@@ -95,18 +93,7 @@ model BookRating {
   book_id   Int
   user_id   String
   rating    Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  book Book @relation(fields: [book_id], references: [id], onDelete: Cascade)
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-}
-
-model BookComment {
-  id        Int      @id @default(autoincrement())
-  book_id   Int
-  user_id   String
-  comment   String
+  comment   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -129,9 +116,10 @@ model BookSaved {
   id        Int      @id @default(autoincrement())
   book_id   Int
   user_id   String
+  book      Book     @relation(fields: [book_id], references: [id])
+  user      User     @relation(fields: [user_id], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  book Book @relation(fields: [book_id], references: [id], onDelete: Cascade)
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  @@unique([book_id, user_id])
 }

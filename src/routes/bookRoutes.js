@@ -1,5 +1,5 @@
 import express from "express";
-import { createBook, getBook, getBookById, getPages, updateBook, deleteBook, getPopularBooks, getRecommendBooks, getLatestBooks, createRating, createRead, createComment, getComments, createSave, getSaved } from "../controllers/bookController.js";
+import { createBook, getBook, getBookById, getPages, updateBook, deleteBook, getPopularBooks, getRecommendBooks, getLatestBooks, createRating, createRead, createSave, getSaved, getBookRatings, deleteSave } from "../controllers/bookController.js";
 import multer from "multer";
 import { isAuth } from "../middleware/isAuth.js";
 import path from "path";
@@ -64,12 +64,14 @@ bookRoutes.get("/", getBook);
 
 
 bookRoutes.get("/:bookId", getBookById);
-bookRoutes.get("/:bookId/comment", getComments);
 bookRoutes.get("/:bookId/pages", getPages);
 bookRoutes.post("/:bookId/rating", isAuth, createRating);
 bookRoutes.get("/:bookId/read", isAuth, createRead);
-bookRoutes.post("/:bookId/comment", isAuth, createComment);
+
 bookRoutes.post("/:bookId/save", isAuth, createSave);
-bookRoutes.get("/:bookId/save", isAuth, getSaved);
+bookRoutes.delete("/:bookId/save", isAuth, deleteSave);
+
+bookRoutes.get("/book/save", isAuth, getSaved);
+bookRoutes.get("/:bookId/ratings", getBookRatings);
 
 export default bookRoutes;

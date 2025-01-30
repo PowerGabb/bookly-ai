@@ -473,7 +473,9 @@ export const getBookById = async (req, res) => {
                     include: {
                         category: true
                     }
-                }
+                },
+                ratings: true,
+                reads: true
             }
         });
 
@@ -481,7 +483,24 @@ export const getBookById = async (req, res) => {
             return errorResponse(res, "Book not found", 404);
         }
 
-        return successResponse(res, "Book fetched successfully", 200, { book });
+        // Hitung rata-rata rating
+        const totalRating = book.ratings.reduce((sum, rating) => sum + rating.rating, 0);
+        const averageRating = book.ratings.length > 0
+            ? parseFloat((totalRating / book.ratings.length).toFixed(1))
+            : 0;
+
+        // Transform data buku
+        const { ratings, reads, ...bookData } = book;
+        const transformedBook = {
+            ...bookData,
+            averageRating,
+            totalReads: reads.length,
+            totalRatings: ratings.length
+        };
+
+        return successResponse(res, "Book fetched successfully", 200, {
+            book: transformedBook
+        });
     } catch (error) {
         return errorResponse(res, error.message, 500);
     }
@@ -694,7 +713,7 @@ export const getLatestBooks = async (req, res) => {
 
 export const createRating = async (req, res) => {
     const { bookId } = req.params;
-    const { rating } = req.body;
+    const { rating, comment } = req.body;
 
     if (!rating || isNaN(parseInt(rating))) {
         return errorResponse(res, "Rating harus berupa angka", 400);
@@ -718,19 +737,24 @@ export const createRating = async (req, res) => {
             }
         });
 
+        let ratingData;
         if (existingRating) {
             // Update rating yang sudah ada
-            await prisma.bookRating.update({
+            ratingData = await prisma.bookRating.update({
                 where: { id: existingRating.id },
-                data: { rating: parseInt(rating) }
+                data: {
+                    rating: parseInt(rating),
+                    comment: comment || existingRating.comment
+                }
             });
-            return successResponse(res, "Rating berhasil diperbarui", 200);
+            return successResponse(res, "Rating dan komentar berhasil diperbarui", 200);
         }
 
         // Buat rating baru
-        await prisma.bookRating.create({
+        ratingData = await prisma.bookRating.create({
             data: {
                 rating: parseInt(rating),
+                comment,
                 user: {
                     connect: { id: req.user.id }
                 },
@@ -740,7 +764,7 @@ export const createRating = async (req, res) => {
             }
         });
 
-        return successResponse(res, "Rating berhasil dibuat", 200);
+        return successResponse(res, "Rating dan komentar berhasil dibuat", 200);
     } catch (error) {
         return errorResponse(res, error.message, 500);
     }
@@ -790,51 +814,44 @@ export const createRead = async (req, res) => {
     }
 }
 
-export const createComment = async (req, res) => {
-    const { bookId } = req.params;
-    const { comment } = req.body;
-
-    if (!comment) {
-        return errorResponse(res, "Komentar tidak boleh kosong", 400);
-    }
-
-    try {
-        await prisma.bookComment.create({
-            data: {
-                comment: comment,
-                book: {
-                    connect: { id: parseInt(bookId) }
-                },
-                user: {
-                    connect: { id: req.user.id }
-                }
-            }
-        });
-
-        return successResponse(res, "Komentar berhasil dibuat", 200);
-    } catch (error) {
-        return errorResponse(res, error.message, 500);
-    }
-}
-
-
-export const getComments = async (req, res) => {
+export const getBookRatings = async (req, res) => {
     const { bookId } = req.params;
     const { page, limit } = req.query;
     const pageNumber = parseInt(page) || 1;
     const pageSize = parseInt(limit) || 10;
 
     try {
-        const comments = await prisma.bookComment.findMany({
+        const ratings = await prisma.bookRating.findMany({
             where: { book_id: parseInt(bookId) },
             include: {
-                user: true
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        avatar_url: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
             },
             skip: (pageNumber - 1) * pageSize,
             take: pageSize
         });
 
-        return successResponse(res, "Komentar berhasil diambil", 200, { comments });
+        const totalItems = await prisma.bookRating.count({
+            where: { book_id: parseInt(bookId) }
+        });
+
+        return successResponse(res, "Rating dan komentar berhasil diambil", 200, {
+            ratings,
+            pagination: {
+                page: pageNumber,
+                limit: pageSize,
+                totalItems,
+                totalPages: Math.ceil(totalItems / pageSize)
+            }
+        });
     } catch (error) {
         return errorResponse(res, error.message, 500);
     }
@@ -872,14 +889,51 @@ export const createSave = async (req, res) => {
     }
 }
 
+export const deleteSave = async (req, res) => {
+    const { bookId } = req.params;
+
+    try {
+        // Cari saved book berdasarkan book_id dan user_id
+        const savedBook = await prisma.bookSaved.findFirst({
+            where: {
+                book_id: parseInt(bookId),
+                user_id: req.user.id
+            }
+        });
+
+        if (!savedBook) {
+            return errorResponse(res, "Buku belum disimpan", 404);
+        }
+
+        // Hapus saved book berdasarkan id yang ditemukan
+        await prisma.bookSaved.delete({
+            where: { id: savedBook.id }
+        });
+
+        return successResponse(res, "Buku berhasil dihapus dari simpanan", 200);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
 export const getSaved = async (req, res) => {
     const { page, limit } = req.query;
     const pageNumber = parseInt(page) || 1;
     const pageSize = parseInt(limit) || 10;
-
     try {
         const savedBooks = await prisma.bookSaved.findMany({
             where: { user_id: req.user.id },
+            include: {
+                book: {
+                    include: {
+                        categories: {
+                            include: {
+                                category: true
+                            }
+                        }
+                    }
+                }
+            },
             skip: (pageNumber - 1) * pageSize,
             take: pageSize
         });
