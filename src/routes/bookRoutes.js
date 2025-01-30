@@ -1,5 +1,5 @@
 import express from "express";
-import { createBook, getBook, getBookById, getPages, updateBook, deleteBook } from "../controllers/bookController.js";
+import { createBook, getBook, getBookById, getPages, updateBook, deleteBook, getPopularBooks, getRecommendBooks, getLatestBooks, createRating, createRead, createComment, getComments } from "../controllers/bookController.js";
 import multer from "multer";
 import { isAuth } from "../middleware/isAuth.js";
 import path from "path";
@@ -49,12 +49,26 @@ const uploadFields = upload.fields([
     { name: 'coverImage', maxCount: 1 }
 ]);
 
+
+
+
+
+bookRoutes.get("/home/popular", getPopularBooks);
+bookRoutes.get("/home/recommend", getRecommendBooks);
+bookRoutes.get("/home/latest", getLatestBooks);
+
 bookRoutes.post("/", isAuth, uploadFields, createBook);
 bookRoutes.put("/:bookId", isAuth, uploadFields, updateBook);
 bookRoutes.delete("/:bookId", isAuth, deleteBook);
 bookRoutes.get("/", getBook);
+
+
 bookRoutes.get("/:bookId", getBookById);
+bookRoutes.get("/:bookId/comment", getComments);
 bookRoutes.get("/:bookId/pages", getPages);
+bookRoutes.post("/:bookId/rating", isAuth, createRating);
+bookRoutes.get("/:bookId/read", isAuth, createRead);
+bookRoutes.post("/:bookId/comment", isAuth, createComment);
 
 
 export default bookRoutes;

@@ -9,16 +9,16 @@ import Tesseract from "tesseract.js";
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const createBook = async (req, res) => {
-    const { 
-        title, 
-        author, 
-        description, 
+    const {
+        title,
+        author,
+        description,
         isbn,
         publisher,
         publicationYear,
         language,
         pageCount,
-        categoryIds 
+        categoryIds
     } = req.body;
 
     console.log(req.files);
@@ -125,16 +125,16 @@ export const createBook = async (req, res) => {
 
 export const updateBook = async (req, res) => {
     const { bookId } = req.params;
-    const { 
-        title, 
-        author, 
-        description, 
+    const {
+        title,
+        author,
+        description,
         isbn,
         publisher,
         publicationYear,
         language,
         pageCount,
-        categoryIds 
+        categoryIds
     } = req.body;
 
     try {
@@ -156,7 +156,7 @@ export const updateBook = async (req, res) => {
                     fs.unlinkSync(oldCoverPath);
                 }
             }
-            
+
             // Set path cover baru
             coverImagePath = `/uploads/covers/${req.files.coverImage[0].filename}`;
         }
@@ -275,7 +275,7 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Buat nama folder yang aman dari karakter khusus
         const safeFolderName = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const outputDir = path.join("uploads", "processed", safeFolderName);
-        
+
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
         }
@@ -333,7 +333,7 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Update status buku setelah selesai
         await prisma.book.update({
             where: { id: bookId },
-            data: { 
+            data: {
                 processed: true,
                 processed_dir: `/uploads/processed/${safeFolderName}`
             }
@@ -353,11 +353,11 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
 
     } catch (error) {
         console.error(`[${bookTitle}] Error processing book pages:`, error);
-        
+
         // Update status error pada buku
         await prisma.book.update({
             where: { id: bookId },
-            data: { 
+            data: {
                 processed: false,
                 error_message: error.message
             }
@@ -366,33 +366,97 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
 }
 
 export const getBook = async (req, res) => {
-    const { page, limit, search } = req.query;
+    const { page, limit, search, categories } = req.query;
     const pageNumber = parseInt(page) || 1;
     const pageSize = parseInt(limit) || 10;
 
     try {
-        const books = await prisma.book.findMany({
-            where: {
-                title: {
-                    contains: search || '', // Menambahkan pencarian berdasarkan judul buku
-                    mode: 'insensitive' // Pencarian tidak case-sensitive
+        // Siapkan filter untuk pencarian
+        let whereClause = {};
+        
+        // Filter berdasarkan judul atau author jika ada search
+        if (search) {
+            whereClause.OR = [
+                {
+                    title: {
+                        contains: search,
+                        mode: 'insensitive'
+                    }
+                },
+                {
+                    author: {
+                        contains: search,
+                        mode: 'insensitive'
+                    }
+                },
+                {
+                    description: {
+                        contains: search,
+                        mode: 'insensitive'
+                    }
                 }
-            },
+            ];
+        }
+
+        // Filter berdasarkan kategori jika ada
+        if (categories) {
+            const categoryIds = categories.split(',').map(id => parseInt(id));
+            whereClause.categories = {
+                some: {
+                    category_id: {
+                        in: categoryIds
+                    }
+                }
+            };
+        }
+
+        const books = await prisma.book.findMany({
+            where: whereClause,
             include: {
                 categories: {
                     include: {
                         category: true
                     }
-                }
+                },
+                ratings: true,
+                reads: true
             },
             skip: (pageNumber - 1) * pageSize,
             take: pageSize
         });
+
+        // Transform data untuk menyederhanakan ratings dan reads
+        const transformedBooks = books.map(book => {
+            // Hitung rata-rata rating
+            const totalRating = book.ratings.reduce((sum, rating) => sum + rating.rating, 0);
+            const averageRating = book.ratings.length > 0
+                ? parseFloat((totalRating / book.ratings.length).toFixed(1))
+                : 0;
+
+            // Hapus array ratings dan reads dari hasil
+            const { ratings, reads, ...bookData } = book;
+
+            return {
+                ...bookData,
+                averageRating,
+                totalReads: reads.length,
+                totalRatings: ratings.length
+            };
+        });
+
+        // Hitung total items dengan filter yang sama
+        const totalItems = await prisma.book.count({
+            where: whereClause
+        });
+
         return successResponse(res, "Books fetched successfully", 200, {
-            books,
-            page: pageNumber,
-            limit: pageSize,
-            total: books.length
+            books: transformedBooks,
+            pagination: {
+                page: pageNumber,
+                limit: pageSize,
+                totalItems,
+                totalPages: Math.ceil(totalItems / pageSize)
+            }
         });
     } catch (error) {
         return errorResponse(res, error.message, 500);
@@ -501,6 +565,276 @@ export const deleteBook = async (req, res) => {
         });
 
         return successResponse(res, "Buku berhasil dihapus", 200);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const getPopularBooks = async (req, res) => {
+    const { page, limit } = req.query;
+    const pageNumber = parseInt(page) || 1;
+    const pageSize = parseInt(limit) || 10;
+
+    try {
+        // Ambil total jumlah buku untuk pagination
+        const totalBooks = await prisma.book.count();
+
+        const books = await prisma.book.findMany({
+            include: {
+                reads: true,
+                categories: {
+                    include: {
+                        category: true
+                    }
+                }
+            },
+            orderBy: {
+                reads: {
+                    _count: 'desc'
+                }
+            },
+            skip: (pageNumber - 1) * pageSize,
+            take: pageSize
+        });
+
+        return successResponse(res, "Buku populer berhasil diambil", 200, {
+            books: books.map(book => ({
+                ...book,
+                readCount: book.reads.length
+            })),
+            pagination: {
+                page: pageNumber,
+                limit: pageSize,
+                totalItems: totalBooks,
+                totalPages: Math.ceil(totalBooks / pageSize)
+            }
+        });
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const getRecommendBooks = async (req, res) => {
+    const { page, limit } = req.query;
+    const pageNumber = parseInt(page) || 1;
+    const pageSize = parseInt(limit) || 10;
+
+    try {
+        // Hitung total buku untuk pagination
+        const totalBooks = await prisma.book.count();
+
+        const books = await prisma.book.findMany({
+            include: {
+                ratings: true,
+                categories: {
+                    include: {
+                        category: true
+                    }
+                }
+            },
+            orderBy: {
+                ratings: {
+                    _count: 'desc'
+                }
+            },
+            skip: (pageNumber - 1) * pageSize,
+            take: pageSize
+        });
+
+        // Hitung rata-rata rating untuk setiap buku
+        const booksWithAvgRating = books.map(book => {
+            const totalRating = book.ratings.reduce((sum, rating) => sum + rating.rating, 0);
+            const averageRating = book.ratings.length > 0
+                ? totalRating / book.ratings.length
+                : 0;
+
+            return {
+                ...book,
+                ratingCount: book.ratings.length,
+                averageRating: parseFloat(averageRating.toFixed(1))
+            };
+        });
+
+        // Urutkan buku berdasarkan rata-rata rating tertinggi
+        const sortedBooks = booksWithAvgRating.sort((a, b) => b.averageRating - a.averageRating);
+
+        return successResponse(res, "Buku rekomendasi berhasil diambil", 200, {
+            books: sortedBooks,
+            pagination: {
+                page: pageNumber,
+                limit: pageSize,
+                totalItems: totalBooks,
+                totalPages: Math.ceil(totalBooks / pageSize)
+            }
+        });
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const getLatestBooks = async (req, res) => {
+    const { page, limit } = req.query;
+    const pageNumber = parseInt(page) || 1;
+    const pageSize = parseInt(limit) || 10;
+
+    try {
+        const books = await prisma.book.findMany({
+            orderBy: {
+                createdAt: 'desc'
+            },
+            skip: (pageNumber - 1) * pageSize,
+            take: pageSize
+        });
+
+        return successResponse(res, "Buku terbaru berhasil diambil", 200, { books });
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const createRating = async (req, res) => {
+    const { bookId } = req.params;
+    const { rating } = req.body;
+
+    if (!rating || isNaN(parseInt(rating))) {
+        return errorResponse(res, "Rating harus berupa angka", 400);
+    }
+
+    try {
+        // Cek apakah buku ada
+        const book = await prisma.book.findUnique({
+            where: { id: parseInt(bookId) }
+        });
+
+        if (!book) {
+            return errorResponse(res, "Buku tidak ditemukan", 404);
+        }
+
+        // Cek apakah user sudah memberikan rating sebelumnya
+        const existingRating = await prisma.bookRating.findFirst({
+            where: {
+                book_id: parseInt(bookId),
+                user_id: req.user.id
+            }
+        });
+
+        if (existingRating) {
+            // Update rating yang sudah ada
+            await prisma.bookRating.update({
+                where: { id: existingRating.id },
+                data: { rating: parseInt(rating) }
+            });
+            return successResponse(res, "Rating berhasil diperbarui", 200);
+        }
+
+        // Buat rating baru
+        await prisma.bookRating.create({
+            data: {
+                rating: parseInt(rating),
+                user: {
+                    connect: { id: req.user.id }
+                },
+                book: {
+                    connect: { id: parseInt(bookId) }
+                }
+            }
+        });
+
+        return successResponse(res, "Rating berhasil dibuat", 200);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const createRead = async (req, res) => {
+    const { bookId } = req.params;
+
+    try {
+        // Cek apakah buku ada
+        const book = await prisma.book.findUnique({
+            where: { id: parseInt(bookId) }
+        });
+
+        if (!book) {
+            return errorResponse(res, "Buku tidak ditemukan", 404);
+        }
+
+        // Cek apakah user sudah membaca buku sebelumnya
+        const existingRead = await prisma.bookRead.findFirst({
+            where: {
+                book_id: parseInt(bookId),
+                user_id: req.user.id
+            }
+        });
+
+        // jika sudah di baca maka tidak ush di tambahkan ke database
+        if (existingRead) {
+            return successResponse(res, "Buku sudah dibaca", 200);
+        }
+
+        await prisma.bookRead.create({
+            data: {
+                book: {
+                    connect: { id: parseInt(bookId) }
+                },
+                read_at: new Date(),
+                user: {
+                    connect: { id: req.user.id }
+                }
+            }
+        });
+
+        return successResponse(res, "Buku berhasil dibaca", 200);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const createComment = async (req, res) => {
+    const { bookId } = req.params;
+    const { comment } = req.body;
+
+    if (!comment) {
+        return errorResponse(res, "Komentar tidak boleh kosong", 400);
+    }
+
+    try {
+        await prisma.bookComment.create({
+            data: {
+                comment: comment,
+                book: {
+                    connect: { id: parseInt(bookId) }
+                },
+                user: {
+                    connect: { id: req.user.id }
+                }
+            }
+        });
+
+        return successResponse(res, "Komentar berhasil dibuat", 200);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+
+export const getComments = async (req, res) => {
+    const { bookId } = req.params;
+    const { page, limit } = req.query;
+    const pageNumber = parseInt(page) || 1;
+    const pageSize = parseInt(limit) || 10;
+
+    try {
+        const comments = await prisma.bookComment.findMany({
+            where: { book_id: parseInt(bookId) },
+            include: {
+            user: true
+        },
+        skip: (pageNumber - 1) * pageSize,
+            take: pageSize
+        });
+
+        return successResponse(res, "Komentar berhasil diambil", 200, { comments });
     } catch (error) {
         return errorResponse(res, error.message, 500);
     }
