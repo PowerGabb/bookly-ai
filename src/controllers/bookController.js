@@ -373,7 +373,7 @@ export const getBook = async (req, res) => {
     try {
         // Siapkan filter untuk pencarian
         let whereClause = {};
-        
+
         // Filter berdasarkan judul atau author jika ada search
         if (search) {
             whereClause.OR = [
@@ -828,13 +828,63 @@ export const getComments = async (req, res) => {
         const comments = await prisma.bookComment.findMany({
             where: { book_id: parseInt(bookId) },
             include: {
-            user: true
-        },
-        skip: (pageNumber - 1) * pageSize,
+                user: true
+            },
+            skip: (pageNumber - 1) * pageSize,
             take: pageSize
         });
 
         return successResponse(res, "Komentar berhasil diambil", 200, { comments });
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const createSave = async (req, res) => {
+    const { bookId } = req.params;
+
+    try {
+        const existingSaved = await prisma.bookSaved.findFirst({
+            where: {
+                book_id: parseInt(bookId),
+                user_id: req.user.id
+            }
+        });
+
+        if (existingSaved) {
+            return successResponse(res, "Buku sudah disimpan", 200);
+        }
+
+        await prisma.bookSaved.create({
+            data: {
+                book: {
+                    connect: { id: parseInt(bookId) }
+                },
+                user: {
+                    connect: { id: req.user.id }
+                }
+            }
+        });
+
+        return successResponse(res, "Buku berhasil disimpan", 200);
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const getSaved = async (req, res) => {
+    const { page, limit } = req.query;
+    const pageNumber = parseInt(page) || 1;
+    const pageSize = parseInt(limit) || 10;
+
+    try {
+        const savedBooks = await prisma.bookSaved.findMany({
+            where: { user_id: req.user.id },
+            skip: (pageNumber - 1) * pageSize,
+            take: pageSize
+        });
+
+        return successResponse(res, "Buku yang disimpan berhasil diambil", 200, { savedBooks });
     } catch (error) {
         return errorResponse(res, error.message, 500);
     }
