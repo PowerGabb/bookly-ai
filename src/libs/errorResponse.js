@@ -1,8 +1,7 @@
-export const errorResponse = (res, message, code) => {
-    res.status(code).json({
+export const errorResponse = (res, message, statusCode = 500) => {
+    return res.status(statusCode).json({
+        success: false,
         message: message,
-        status: false,
-        code: code
+        error: message
     });
-    return;
 };

@@ -14,21 +14,23 @@ datasource db {
 }
 
 model User {
-  id                 String   @id @default(cuid())
+  id                 String            @id @default(cuid())
   name               String?
-  email              String   @unique
+  email              String            @unique
   password           String
-  role               String?  @default("user")
+  role               String?           @default("user")
+  phone              String?           @unique
   avatar_url         String?
-  subscription_level Int?     @default(0)
-  isActive           Boolean  @default(false)
-  activationToken    String?  @unique
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  subscription_level Int?              @default(0)
+  isActive           Boolean           @default(false)
+  activationToken    String?           @unique
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  otpVerifications   OtpVerification[]
 
-  ratings    BookRating[]
-  reads      BookRead[]
-  saved      BookSaved[]
+  ratings BookRating[]
+  reads   BookRead[]
+  saved   BookSaved[]
 }
 
 model Book {
@@ -108,8 +110,8 @@ model BookRead {
   read_at   DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  book Book @relation(fields: [book_id], references: [id], onDelete: Cascade)
-  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  book      Book     @relation(fields: [book_id], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
 model BookSaved {
@@ -122,4 +124,19 @@ model BookSaved {
   updatedAt DateTime @updatedAt
 
   @@unique([book_id, user_id])
+}
+
+model OtpVerification {
+  id          String    @id @default(cuid())
+  user_id     String
+  phone       String
+  otp         String
+  expires_at  DateTime
+  verified_at DateTime?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  user        User      @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([phone])
 }
