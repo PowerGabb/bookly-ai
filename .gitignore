@@ -1,3 +1,9 @@
 node_modules
 # Keep environment variables out of version control
 .env
+
+/uploads/avatars/*
+/uploads/covers/*
+/uploads/processed/*
+/uploads/waiting-process/*
+
