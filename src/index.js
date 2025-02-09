@@ -24,7 +24,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.get('/', (req, res) => {
-    res.send('Welcome To Bookly API');
+    res.send('Welcome To Bookly API Developers');
 });
 app.use("/api", router);
 
