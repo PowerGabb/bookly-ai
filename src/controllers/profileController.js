@@ -1,5 +1,5 @@
 import prisma from '../utils/prisma.js';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import axios from 'axios';
 import { errorResponse } from '../libs/errorResponse.js';
 import { successResponse } from '../libs/successResponse.js';
