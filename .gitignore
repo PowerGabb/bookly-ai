@@ -1,7 +1,4 @@
-node_modules/*
-!node_modules/.prisma
-!node_modules/@prisma
-# Keep environment variables out of version control
+node_modules
 .env
 
 /uploads/avatars/*
