@@ -6,6 +6,7 @@ import path from "path";
 import Tesseract from "tesseract.js";
 import sharp from "sharp";
 import { createRequire } from 'module';
+import pdf from "pdf-parse";
 
 const require = createRequire(import.meta.url);
 const pdfImgConvert = require('pdf-img-convert');
@@ -288,61 +289,73 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Inisialisasi worker Tesseract
         const worker = await Tesseract.createWorker('eng');
 
-        // Konversi PDF ke array of images
-        console.log(`[${bookTitle}] Converting PDF to images...`);
-        const pdfArray = await pdfImgConvert.convert(pdfPath);
-        console.log(`[${bookTitle}] PDF converted to ${pdfArray.length} images`);
+        // Baca file PDF untuk mendapatkan jumlah halaman
+        const dataBuffer = fs.readFileSync(pdfPath);
+        const data = await pdf(dataBuffer);
+        const totalPages = data.numpages;
 
-        // Proses setiap halaman
-        for (let index = 0; index < pdfArray.length; index++) {
+        // Proses PDF dalam batch
+        const BATCH_SIZE = 5; // Proses 5 halaman per batch
+        
+        for (let startPage = 1; startPage <= totalPages; startPage += BATCH_SIZE) {
+            const endPage = Math.min(startPage + BATCH_SIZE - 1, totalPages);
+            console.log(`[${bookTitle}] Processing batch: pages ${startPage} to ${endPage}`);
+
             try {
-                const pageNumber = index + 1;
-                console.log(`[${bookTitle}] Processing page ${pageNumber}`);
-
-                const fileName = `page-${pageNumber}.png`;
-                const imagePath = path.join(outputDir, fileName);
-
-                // Simpan gambar
-                await fs.promises.writeFile(imagePath, pdfArray[index]);
-                console.log(`[${bookTitle}] Raw image saved`);
-
-                // Optimasi gambar menggunakan sharp
-                await sharp(imagePath)
-                    .resize(2048, 2048, {
-                        fit: 'inside',
-                        withoutEnlargement: true
-                    })
-                    .toFile(path.join(outputDir, `optimized-${fileName}`));
-
-                // Ganti file original dengan file yang dioptimasi
-                fs.renameSync(
-                    path.join(outputDir, `optimized-${fileName}`),
-                    imagePath
-                );
-
-                console.log(`[${bookTitle}] Page ${pageNumber} optimized`);
-
-                // Proses OCR
-                console.log(`[${bookTitle}] Starting OCR for page ${pageNumber}`);
-                const { data: { text } } = await worker.recognize(imagePath);
-                console.log(`[${bookTitle}] OCR completed for page ${pageNumber}`);
-
-                // Simpan ke database
-                await prisma.bookPage.create({
-                    data: {
-                        book_id: bookId,
-                        page_number: pageNumber,
-                        image_url: `/uploads/processed/${safeFolderName}/${fileName}`,
-                        text: text
-                    }
+                // Konversi batch halaman ke gambar
+                const pdfArray = await pdfImgConvert.convert(pdfPath, {
+                    start: startPage,
+                    end: endPage
                 });
 
-                console.log(`[${bookTitle}] Page ${pageNumber} saved to database`);
-                await delay(500);
+                // Proses setiap halaman dalam batch
+                for (let i = 0; i < pdfArray.length; i++) {
+                    const pageNumber = startPage + i;
+                    console.log(`[${bookTitle}] Processing page ${pageNumber}`);
+
+                    const fileName = `page-${pageNumber}.png`;
+                    const imagePath = path.join(outputDir, fileName);
+
+                    // Simpan gambar
+                    await fs.promises.writeFile(imagePath, pdfArray[i]);
+
+                    // Optimasi gambar
+                    await sharp(imagePath)
+                        .resize(1024, 1024, {
+                            fit: 'inside',
+                            withoutEnlargement: true
+                        })
+                        .toFile(path.join(outputDir, `optimized-${fileName}`));
+
+                    // Ganti file original dengan file yang dioptimasi
+                    fs.renameSync(
+                        path.join(outputDir, `optimized-${fileName}`),
+                        imagePath
+                    );
+
+                    // Proses OCR
+                    const { data: { text } } = await worker.recognize(imagePath);
+
+                    // Simpan ke database
+                    await prisma.bookPage.create({
+                        data: {
+                            book_id: bookId,
+                            page_number: pageNumber,
+                            image_url: `/uploads/processed/${safeFolderName}/${fileName}`,
+                            text: text
+                        }
+                    });
+
+                    console.log(`[${bookTitle}] Page ${pageNumber} completed`);
+                }
+
+                // Bersihkan memory setelah setiap batch
+                global.gc && global.gc();
+                await delay(1000); // Delay antar batch
 
             } catch (error) {
-                console.error(`[${bookTitle}] Error processing page ${index + 1}:`, error);
-                await delay(1000);
+                console.error(`[${bookTitle}] Error processing batch ${startPage}-${endPage}:`, error);
+                await delay(2000);
             }
         }
 
@@ -358,16 +371,13 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
             }
         });
 
-        console.log(`[${bookTitle}] Processing completed successfully`);
-
         // Hapus file PDF original
         if (fs.existsSync(pdfPath)) {
             fs.unlinkSync(pdfPath);
-            console.log(`[${bookTitle}] Cleaned up temporary PDF file`);
         }
 
     } catch (error) {
-        console.error(`[${bookTitle}] Error processing book pages:`, error);
+        console.error(`[${bookTitle}] Error processing book:`, error);
         await prisma.book.update({
             where: { id: bookId },
             data: {
