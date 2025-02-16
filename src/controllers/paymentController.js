@@ -15,6 +15,50 @@ export const createPayment = async (req, res) => {
     const { subscription_type, payment_method } = req.body;
     const userId = req.user.id;
 
+    // Validasi input
+    if (!subscription_type || !payment_method) {
+      return errorResponse(res, 'subscription_type and payment_method are required', 400);
+    }
+
+    // Cek existing transaction
+    const existingTransaction = await prisma.transaction.findFirst({
+      where: {
+        user_id: userId,
+        subscription_type: subscription_type,
+        payment_type: payment_method,
+        status: 'PENDING',
+        created_at: {
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
+        }
+      }
+    });
+
+    if (existingTransaction) {
+      // Ambil detail transaksi dari Midtrans
+      const transactionStatus = await core.transaction.status(existingTransaction.order_id);
+      
+      // Jika transaksi masih valid (belum expired)
+      if (transactionStatus.transaction_status === 'pending') {
+        // Gunakan payment_details yang sudah disimpan di database
+        const paymentDetails = {
+          ...transactionStatus,
+          actions: existingTransaction.payment_details.actions // Ambil actions dari database
+        };
+
+        return successResponse(res, 'Existing payment found', 200, {
+          transaction_id: existingTransaction.id,
+          order_id: existingTransaction.order_id,
+          payment_details: paymentDetails
+        });
+      }
+      
+      // Update status jika expired
+      await prisma.transaction.update({
+        where: { id: existingTransaction.id },
+        data: { status: 'FAILED' }
+      });
+    }
+
     // Get subscription details
     const subscriptionDetails = {
       1: { name: 'Basic Plan', price: 29000 },
@@ -121,7 +165,10 @@ export const createPayment = async (req, res) => {
         return errorResponse(res, 'Invalid payment method', 400);
     }
 
-    // Buat transaksi di database
+    // Buat charge ke Midtrans
+    const charge = await core.charge(transactionDetails);
+
+    // Buat transaksi di database dan simpan semua detail termasuk actions
     const transaction = await prisma.transaction.create({
       data: {
         order_id: orderId,
@@ -129,12 +176,10 @@ export const createPayment = async (req, res) => {
         amount: subscriptionDetails.price,
         subscription_type: subscription_type,
         status: 'PENDING',
-        payment_type: payment_method
+        payment_type: payment_method,
+        payment_details: charge // Simpan seluruh response charge termasuk actions
       }
     });
-
-    // Buat charge ke Midtrans
-    const charge = await core.charge(transactionDetails);
 
     return successResponse(res, 'Payment initiated successfully', 200, {
       transaction_id: transaction.id,

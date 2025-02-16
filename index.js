@@ -21,7 +21,7 @@ app.use(cors({
 app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, '/uploads')));
 
 app.get('/', (req, res) => {
     res.send('Welcome To Bookly API Developers');
@@ -29,7 +29,7 @@ app.get('/', (req, res) => {
 app.use("/api", router);
 
 
-app.listen(process.env.PORT, () => {
-    console.log(`Server is running on http://localhost:${process.env.PORT}`);
+app.listen(process.env.PORT, "192.168.1.132", () => {
+    console.log(`Server is running on http://192.168.1.132:${process.env.PORT}`);
 });
 
