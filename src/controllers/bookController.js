@@ -3,8 +3,8 @@ import { successResponse } from "../libs/successResponse.js";
 import prisma from "../utils/prisma.js";
 import fs from "fs";
 import path from "path";
-import { pdf } from "pdf-to-img";
 import Tesseract from "tesseract.js";
+import sharp from "sharp";
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -272,7 +272,6 @@ export const updateBook = async (req, res) => {
 
 const processBookPages = async (bookId, bookTitle, pdfPath) => {
     try {
-        // Buat nama folder yang aman dari karakter khusus
         const safeFolderName = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const outputDir = path.join("uploads", "processed", safeFolderName);
 
@@ -285,19 +284,34 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Inisialisasi worker Tesseract
         const worker = await Tesseract.createWorker('eng');
 
-        // Buka dokumen PDF
-        const document = await pdf(pdfPath, { scale: 2 });
-        let pageNumber = 1;
+        // Import pdf-img-convert secara dinamis
+        const pdf2img = await import("pdf-img-convert");
+        
+        // Konversi PDF ke array of image buffers
+        const outputImages = await pdf2img.convert(pdfPath, {
+            scale: 2.0,
+            density: 300,
+            quality: 100,
+            format: 'png'
+        });
 
         // Proses setiap halaman
-        for await (const imageBuffer of document) {
+        for (let pageNumber = 1; pageNumber <= outputImages.length; pageNumber++) {
             try {
                 console.log(`[${bookTitle}] Processing page ${pageNumber}`);
 
-                // Simpan gambar ke file
+                const imageBuffer = outputImages[pageNumber - 1];
                 const fileName = `page-${pageNumber}.png`;
                 const imagePath = path.join(outputDir, fileName);
-                await fs.promises.writeFile(imagePath, imageBuffer);
+
+                // Optimasi gambar menggunakan sharp
+                await sharp(imageBuffer)
+                    .resize(2048, 2048, {
+                        fit: 'inside',
+                        withoutEnlargement: true
+                    })
+                    .toFile(imagePath);
+
                 console.log(`[${bookTitle}] Page ${pageNumber} saved as image`);
 
                 // Proses OCR
@@ -305,7 +319,7 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
                 const { data: { text } } = await worker.recognize(imagePath);
                 console.log(`[${bookTitle}] OCR completed for page ${pageNumber}`);
 
-                // Simpan ke database dengan URL yang bisa diakses publik
+                // Simpan ke database
                 await prisma.bookPage.create({
                     data: {
                         book_id: bookId,
@@ -316,9 +330,6 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
                 });
 
                 console.log(`[${bookTitle}] Page ${pageNumber} saved to database`);
-                pageNumber++;
-
-                // Tunggu sebentar sebelum lanjut ke halaman berikutnya
                 await delay(500);
 
             } catch (error) {
@@ -330,7 +341,7 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Terminate Tesseract worker
         await worker.terminate();
 
-        // Update status buku setelah selesai
+        // Update status buku
         await prisma.book.update({
             where: { id: bookId },
             data: {
@@ -341,20 +352,14 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
 
         console.log(`[${bookTitle}] Processing completed successfully`);
 
-        // Hapus file PDF dari waiting-process
-        try {
-            if (fs.existsSync(pdfPath)) {
-                fs.unlinkSync(pdfPath);
-                console.log(`[${bookTitle}] Cleaned up temporary PDF file`);
-            }
-        } catch (unlinkError) {
-            console.error(`[${bookTitle}] Error deleting PDF file:`, unlinkError);
+        // Hapus file PDF original
+        if (fs.existsSync(pdfPath)) {
+            fs.unlinkSync(pdfPath);
+            console.log(`[${bookTitle}] Cleaned up temporary PDF file`);
         }
 
     } catch (error) {
         console.error(`[${bookTitle}] Error processing book pages:`, error);
-
-        // Update status error pada buku
         await prisma.book.update({
             where: { id: bookId },
             data: {
