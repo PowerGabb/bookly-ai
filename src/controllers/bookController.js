@@ -5,6 +5,10 @@ import fs from "fs";
 import path from "path";
 import Tesseract from "tesseract.js";
 import sharp from "sharp";
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const pdfImgConvert = require('pdf-img-convert');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -284,35 +288,39 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Inisialisasi worker Tesseract
         const worker = await Tesseract.createWorker('eng');
 
-        // Import pdf-img-convert secara dinamis
-        const pdf2img = await import("pdf-img-convert");
-        
-        // Konversi PDF ke array of image buffers
-        const outputImages = await pdf2img.convert(pdfPath, {
-            scale: 2.0,
-            density: 300,
-            quality: 100,
-            format: 'png'
-        });
+        // Konversi PDF ke array of images
+        console.log(`[${bookTitle}] Converting PDF to images...`);
+        const pdfArray = await pdfImgConvert.convert(pdfPath);
+        console.log(`[${bookTitle}] PDF converted to ${pdfArray.length} images`);
 
         // Proses setiap halaman
-        for (let pageNumber = 1; pageNumber <= outputImages.length; pageNumber++) {
+        for (let index = 0; index < pdfArray.length; index++) {
             try {
+                const pageNumber = index + 1;
                 console.log(`[${bookTitle}] Processing page ${pageNumber}`);
 
-                const imageBuffer = outputImages[pageNumber - 1];
                 const fileName = `page-${pageNumber}.png`;
                 const imagePath = path.join(outputDir, fileName);
 
+                // Simpan gambar
+                await fs.promises.writeFile(imagePath, pdfArray[index]);
+                console.log(`[${bookTitle}] Raw image saved`);
+
                 // Optimasi gambar menggunakan sharp
-                await sharp(imageBuffer)
+                await sharp(imagePath)
                     .resize(2048, 2048, {
                         fit: 'inside',
                         withoutEnlargement: true
                     })
-                    .toFile(imagePath);
+                    .toFile(path.join(outputDir, `optimized-${fileName}`));
 
-                console.log(`[${bookTitle}] Page ${pageNumber} saved as image`);
+                // Ganti file original dengan file yang dioptimasi
+                fs.renameSync(
+                    path.join(outputDir, `optimized-${fileName}`),
+                    imagePath
+                );
+
+                console.log(`[${bookTitle}] Page ${pageNumber} optimized`);
 
                 // Proses OCR
                 console.log(`[${bookTitle}] Starting OCR for page ${pageNumber}`);
@@ -333,7 +341,7 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
                 await delay(500);
 
             } catch (error) {
-                console.error(`[${bookTitle}] Error processing page ${pageNumber}:`, error);
+                console.error(`[${bookTitle}] Error processing page ${index + 1}:`, error);
                 await delay(1000);
             }
         }
