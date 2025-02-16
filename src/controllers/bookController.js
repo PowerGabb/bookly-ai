@@ -6,8 +6,6 @@ import path from "path";
 import Tesseract from "tesseract.js";
 import sharp from "sharp";
 import { createRequire } from 'module';
-import pdf from "pdf-parse";
-
 const require = createRequire(import.meta.url);
 const pdfImgConvert = require('pdf-img-convert');
 
@@ -289,35 +287,27 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
         // Inisialisasi worker Tesseract
         const worker = await Tesseract.createWorker('eng');
 
-        // Baca file PDF untuk mendapatkan jumlah halaman
-        const dataBuffer = fs.readFileSync(pdfPath);
-        const data = await pdf(dataBuffer);
-        const totalPages = data.numpages;
+        // Konversi PDF ke array of images
+        const pdfArray = await pdfImgConvert.convert(pdfPath);
+        const totalPages = pdfArray.length;
+        console.log(`[${bookTitle}] Total pages to process: ${totalPages}`);
 
-        // Proses PDF dalam batch
-        const BATCH_SIZE = 5; // Proses 5 halaman per batch
-        
-        for (let startPage = 1; startPage <= totalPages; startPage += BATCH_SIZE) {
-            const endPage = Math.min(startPage + BATCH_SIZE - 1, totalPages);
-            console.log(`[${bookTitle}] Processing batch: pages ${startPage} to ${endPage}`);
+        // Proses dalam batch
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < totalPages; i += BATCH_SIZE) {
+            const batchEnd = Math.min(i + BATCH_SIZE, totalPages);
 
             try {
-                // Konversi batch halaman ke gambar
-                const pdfArray = await pdfImgConvert.convert(pdfPath, {
-                    start: startPage,
-                    end: endPage
-                });
-
                 // Proses setiap halaman dalam batch
-                for (let i = 0; i < pdfArray.length; i++) {
-                    const pageNumber = startPage + i;
-                    console.log(`[${bookTitle}] Processing page ${pageNumber}`);
-
+                for (let j = i; j < batchEnd; j++) {
+                    const pageNumber = j + 1;
+                    console.log(`[${bookTitle}] Processing page ${pageNumber} of ${totalPages}`);
+                    
                     const fileName = `page-${pageNumber}.png`;
                     const imagePath = path.join(outputDir, fileName);
 
                     // Simpan gambar
-                    await fs.promises.writeFile(imagePath, pdfArray[i]);
+                    await fs.promises.writeFile(imagePath, pdfArray[j]);
 
                     // Optimasi gambar
                     await sharp(imagePath)
@@ -333,10 +323,8 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
                         imagePath
                     );
 
-                    // Proses OCR
+                    // Proses OCR dan simpan ke database
                     const { data: { text } } = await worker.recognize(imagePath);
-
-                    // Simpan ke database
                     await prisma.bookPage.create({
                         data: {
                             book_id: bookId,
@@ -345,16 +333,14 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
                             text: text
                         }
                     });
-
-                    console.log(`[${bookTitle}] Page ${pageNumber} completed`);
                 }
 
                 // Bersihkan memory setelah setiap batch
                 global.gc && global.gc();
-                await delay(1000); // Delay antar batch
+                await delay(1000);
 
             } catch (error) {
-                console.error(`[${bookTitle}] Error processing batch ${startPage}-${endPage}:`, error);
+                console.error(`[${bookTitle}] Error in batch processing:`, error);
                 await delay(2000);
             }
         }
