@@ -240,3 +240,66 @@ export const handleCallback = async (req, res) => {
     return errorResponse(res, error.message, 500);
   }
 };
+
+export const getStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    // Cek apakah transaksi ada di database
+    const transaction = await prisma.transaction.findUnique({
+      where: { order_id: orderId }
+    });
+
+    if (!transaction) {
+      return errorResponse(res, 'Transaction not found', 404);
+    }
+
+    // Cek apakah user yang request adalah pemilik transaksi
+    if (transaction.user_id !== req.user.id) {
+      return errorResponse(res, 'Unauthorized', 403);
+    }
+
+    // Get status dari Midtrans
+    const statusResponse = await core.transaction.status(orderId);
+
+    // Update status di database jika berbeda
+    let status = transaction.status;
+    if (statusResponse.transaction_status === 'settlement' || 
+        statusResponse.transaction_status === 'capture') {
+      status = 'SUCCESS';
+    } else if (statusResponse.transaction_status === 'pending') {
+      status = 'PENDING';
+    } else if (statusResponse.transaction_status === 'deny' || 
+               statusResponse.transaction_status === 'cancel' || 
+               statusResponse.transaction_status === 'expire') {
+      status = 'FAILED';
+    }
+
+    // Update transaction status jika berbeda
+    if (status !== transaction.status) {
+      await prisma.transaction.update({
+        where: { order_id: orderId },
+        data: { status }
+      });
+
+      // Jika pembayaran berhasil, update subscription level user
+      if (status === 'SUCCESS') {
+        await prisma.user.update({
+          where: { id: transaction.user_id },
+          data: { subscription_level: transaction.subscription_type }
+        });
+      }
+    }
+
+    return successResponse(res, 'Payment status retrieved', 200, {
+      transaction_id: transaction.id,
+      order_id: orderId,
+      status,
+      payment_details: statusResponse
+    });
+
+  } catch (error) {
+    console.error('Get status error:', error);
+    return errorResponse(res, error.message, 500);
+  }
+};

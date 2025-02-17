@@ -300,3 +300,36 @@ export const updatePassword = async (req, res) => {
     return errorResponse(res, error.message);
   }
 };
+
+export const getCurrentUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        avatar_url: true,
+        subscription_level: true,
+        isActive: true,
+        phone: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    if (!user) {
+      return errorResponse(res, 'User tidak ditemukan', 404);
+    }
+
+    return successResponse(res, "Berhasil mendapatkan data user", 200, {
+      user
+    });
+
+  } catch (error) {
+    return errorResponse(res, error.message);
+  }
+};

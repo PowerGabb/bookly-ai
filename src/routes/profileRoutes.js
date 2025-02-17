@@ -5,16 +5,13 @@ import {
   sendPhoneOTP, 
   verifyPhoneOTP,
   updatePassword,
-  upload 
+  upload,
+  getCurrentUser 
 } from "../controllers/profileController.js";
 
 const profileRoutes = express.Router();
 
-profileRoutes.get("/", isAuth, (req, res) => {
-    return res.json({
-        data: "Hello World"
-    })
-});
+profileRoutes.get("/", isAuth, getCurrentUser);
 
 profileRoutes.put("/update", isAuth, upload.single('avatar'), updateProfile);
 profileRoutes.post("/send-otp", isAuth, sendPhoneOTP);
