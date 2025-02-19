@@ -30,9 +30,10 @@ model User {
   otpVerifications   OtpVerification[]
   transactions       Transaction[]
 
-  ratings BookRating[]
-  reads   BookRead[]
-  saved   BookSaved[]
+  ratings    BookRating[]
+  reads      BookRead[]
+  saved      BookSaved[]
+  chatHistory ChatHistory[]
 }
 
 model Book {
@@ -58,6 +59,7 @@ model Book {
   ratings    BookRating[]
   reads      BookRead[]
   saved      BookSaved[]
+  chatHistory ChatHistory[]
 }
 
 model BookPage {
@@ -155,4 +157,22 @@ model Transaction {
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
   user              User     @relation(fields: [user_id], references: [id])
+}
+
+model ChatHistory {
+  id                String    @id @default(cuid())
+  user_id           String
+  book_id           Int
+  page_number       Int
+  parent_message_id String?
+  role              String    // system, user, atau assistant
+  content           String    @db.Text
+  created_at        DateTime  @default(now())
+  
+  user              User      @relation(fields: [user_id], references: [id])
+  book              Book      @relation(fields: [book_id], references: [id])
+
+  @@index([user_id])
+  @@index([book_id])
+  @@index([parent_message_id])
 }
