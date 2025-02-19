@@ -1,10 +1,12 @@
 import express from "express";
-import { askPage, getChatHistory } from "../controllers/aiController.js";
+import { askPage, getChatHistory, textToSpeech, getPageAudios } from "../controllers/aiController.js";
 import { isAuth } from "../middleware/isAuth.js";
 
 const aiRoutes = express.Router();
 
 aiRoutes.post('/ask-page', isAuth, askPage);
-aiRoutes.get('/chat-history/:bookId/:pageNumber', isAuth, getChatHistory);
+aiRoutes.get('/chat-history/:bookId', isAuth, getChatHistory);
+aiRoutes.post('/text-to-speech', isAuth, textToSpeech);
+aiRoutes.get('/page-audios/:bookId/:pageNumber', isAuth, getPageAudios);
 
 export default aiRoutes;

@@ -34,6 +34,7 @@ model User {
   reads      BookRead[]
   saved      BookSaved[]
   chatHistory ChatHistory[]
+  audioFiles   BookAudio[]
 }
 
 model Book {
@@ -60,6 +61,7 @@ model Book {
   reads      BookRead[]
   saved      BookSaved[]
   chatHistory ChatHistory[]
+  audioFiles   BookAudio[]
 }
 
 model BookPage {
@@ -175,4 +177,23 @@ model ChatHistory {
   @@index([user_id])
   @@index([book_id])
   @@index([parent_message_id])
+}
+
+model BookAudio {
+  id           Int      @id @default(autoincrement())
+  user_id      String
+  book_id      Int
+  page_number  Int
+  file_url     String
+  voice        String   // alloy, echo, fable, onyx, nova, shimmer
+  style        String   // default, storyteller, professional, casual, dramatic
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  user         User     @relation(fields: [user_id], references: [id])
+  book         Book     @relation(fields: [book_id], references: [id])
+
+  @@index([user_id])
+  @@index([book_id])
+  @@index([page_number])
 }
