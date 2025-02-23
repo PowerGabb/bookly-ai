@@ -18,7 +18,7 @@ model User {
   id                 String            @id @default(cuid())
   name               String?
   email              String            @unique
-  password           String
+  password           String?
   role               String?           @default("user")
   phone              String?           @unique
   avatar_url         String?
@@ -29,6 +29,7 @@ model User {
   updatedAt          DateTime          @updatedAt
   otpVerifications   OtpVerification[]
   transactions       Transaction[]
+  googleId           String?           @unique
 
   ratings    BookRating[]
   reads      BookRead[]

@@ -6,6 +6,10 @@ import prisma from "../utils/prisma.js";
 import { successResponse } from "../libs/successResponse.js";
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../libs/jwt.js";
 import { sendEmail } from "../libs/nodemailer.js";
+import { OAuth2Client } from 'google-auth-library';
+import axios from 'axios';
+
+const client = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
 export const register = async (req, res) => {
     const validation = requestValidation(registerValidation, req);
@@ -121,6 +125,10 @@ export const login = async (req, res) => {
             return errorResponse(res, "User not found", 404);
         }
 
+        if (!user.password) {
+            return errorResponse(res, "Akun ini terdaftar menggunakan Google. Silakan login dengan Google.", 400);
+        }
+
         const isPasswordValid = await comparePassword(password, user.password);
         if (!isPasswordValid) {
             return errorResponse(res, "Invalid password", 400);
@@ -157,6 +165,75 @@ export const refreshToken = async (req, res) => {
             accessToken
         });
     } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+}
+
+export const googleAuth = async (req, res) => {
+    const { accessToken } = req.body;
+    
+    try {
+        // Gunakan accessToken untuk mendapatkan info user dari Google
+        const googleUserInfo = await axios.get(
+            'https://www.googleapis.com/oauth2/v3/userinfo',
+            {
+                headers: { Authorization: `Bearer ${accessToken}` }
+            }
+        );
+
+        const { email, name, picture, sub: googleId } = googleUserInfo.data;
+        
+        // Cari user berdasarkan email Google
+        let user = await prisma.user.findUnique({
+            where: {
+                email
+            }
+        });
+        
+        if (user) {
+            // Jika user sudah ada tapi belum punya googleId
+            if (!user.googleId) {
+                // Jika user sudah terdaftar dengan password
+                if (user.password) {
+                    return errorResponse(res, "Email ini sudah terdaftar menggunakan password. Silakan login dengan email dan password.", 400);
+                }
+                // Update user dengan googleId
+                user = await prisma.user.update({
+                    where: { id: user.id },
+                    data: { googleId }
+                });
+            }
+        } else {
+            // Buat user baru
+            user = await prisma.user.create({
+                data: {
+                    email,
+                    name,
+                    avatar_url: picture,
+                    isActive: true,
+                    googleId
+                }
+            });
+        }
+        
+        const jwtAccessToken = generateAccessToken({ id: user.id });
+        const jwtRefreshToken = generateRefreshToken({ id: user.id });
+        
+        return successResponse(res, "Google login success", 200, {
+            user: {
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                avatar_url: user.avatar_url,
+                subscription_level: user.subscription_level,
+                isActive: user.isActive,
+            },
+            accessToken: jwtAccessToken,
+            refreshToken: jwtRefreshToken
+        });
+        
+    } catch (error) {
+        console.error('Google auth error:', error);
         return errorResponse(res, error.message, 500);
     }
 }
