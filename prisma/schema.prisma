@@ -190,6 +190,7 @@ model BookAudio {
   style        String   // default, storyteller, professional, casual, dramatic
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
+  part         Int      @default(1)
 
   user         User     @relation(fields: [user_id], references: [id])
   book         Book     @relation(fields: [book_id], references: [id])

@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "BookAudio" ADD COLUMN     "part" INTEGER NOT NULL DEFAULT 1;
