@@ -927,6 +927,7 @@ export const deleteSave = async (req, res) => {
 
 export const getSaved = async (req, res) => {
     const { page, limit } = req.query;
+    console.log(req.user);
     const pageNumber = parseInt(page) || 1;
     const pageSize = parseInt(limit) || 10;
     try {

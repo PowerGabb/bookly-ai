@@ -199,3 +199,18 @@ model BookAudio {
   @@index([book_id])
   @@index([page_number])
 }
+
+model Voice {
+  id            Int      @id @default(autoincrement())
+  name          String
+  speaker_id    String   @unique
+  language      String
+  gender        String?
+  classification String
+  description   String?  @db.Text
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([language])
+  @@index([classification])
+}
