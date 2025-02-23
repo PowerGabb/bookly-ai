@@ -224,7 +224,7 @@ export const googleAuth = async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                avatar_url: user.avatar_url,
+            avatar_url: user.avatar_url,
                 subscription_level: user.subscription_level,
                 isActive: user.isActive,
             },
