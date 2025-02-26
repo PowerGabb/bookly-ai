@@ -158,7 +158,8 @@ model Transaction {
   subscription_type Int
   status            String   // PENDING, SUCCESS, FAILED, CHALLENGE
   payment_type      String?
-  payment_details   Json?    @db.JsonB  // Menggunakan JsonB untuk PostgreSQL
+  snap_token        String?  // Tambahkan kolom ini
+  payment_details   Json?    @db.JsonB
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
   user              User     @relation(fields: [user_id], references: [id])
