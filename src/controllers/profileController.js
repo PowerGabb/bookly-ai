@@ -317,7 +317,9 @@ export const getCurrentUser = async (req, res) => {
         isActive: true,
         phone: true,
         createdAt: true,
-        updatedAt: true
+        updatedAt: true,
+        ai_credit: true,
+        tts_credit: true
       }
     });
 

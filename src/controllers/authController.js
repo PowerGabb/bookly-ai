@@ -145,6 +145,8 @@ export const login = async (req, res) => {
                 avatar_url: user.avatar_url,
                 subscription_level: user.subscription_level,
                 isActive: user.isActive,
+                ai_credit: user.ai_credit,
+                tts_credit: user.tts_credit,
             },
             accessToken,
             refreshToken

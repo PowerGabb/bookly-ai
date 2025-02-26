@@ -25,6 +25,8 @@ model User {
   subscription_level Int?              @default(0)
   isActive           Boolean           @default(false)
   activationToken    String?           @unique
+  ai_credit          Int?              @default(50)  // Kredit untuk AI chat
+  tts_credit         Int?              @default(5)  // Kredit untuk Text-to-Speech
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   otpVerifications   OtpVerification[]

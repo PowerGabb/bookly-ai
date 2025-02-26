@@ -47,6 +47,24 @@ const makeRequestWithRetry = async (chunk, speaker, emotion, retries = 3, baseDe
     }
 };
 
+const decrementCredit = async (userId, creditType) => {
+    const creditField = creditType === 'AI_CHAT' ? 'ai_credit' : 'tts_credit';
+    const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: {
+            [creditField]: {
+                decrement: 1
+            }
+        },
+        select: {
+            ai_credit: true,
+            tts_credit: true
+        }
+    });
+    
+    return creditType === 'AI_CHAT' ? updatedUser.ai_credit : updatedUser.tts_credit;
+};
+
 export const askPage = async (req, res) => {
   const { bookId, pageNumber, question, parentMessageId } = req.body;
   const userId = req.user.id;
@@ -148,7 +166,7 @@ export const askPage = async (req, res) => {
         orderBy: {
           created_at: "asc",
         },
-        take: 10, // Batasi 10 pesan terakhir untuk performa
+        take: 5, // Batasi 10 pesan terakhir untuk performa
       });
 
       messages.push(
@@ -198,6 +216,9 @@ export const askPage = async (req, res) => {
       },
     });
 
+    // Kurangi kredit dan dapatkan sisa kredit
+    const remainingCredits = await decrementCredit(userId, req.creditType);
+
     return successResponse(res, "Berhasil mendapatkan jawaban", 200, {
       answer: completion,
       pageInfo: {
@@ -207,6 +228,7 @@ export const askPage = async (req, res) => {
       },
       messageId: savedAIMessage.id,
       hasHistory: messages.length > 2, // Lebih dari system message dan context
+      remainingCredits // Tambahkan sisa kredit ke response
     });
   } catch (error) {
     console.error("Error in askPage:", error);
@@ -327,6 +349,9 @@ export const textToSpeech = async (req, res) => {
       },
     });
 
+    // Kurangi kredit dan dapatkan sisa kredit
+    const remainingCredits = await decrementCredit(userId, req.creditType);
+
     return successResponse(res, "Berhasil menghasilkan audio", 200, {
       audio: audioRecord,
       pageInfo: {
@@ -334,7 +359,8 @@ export const textToSpeech = async (req, res) => {
         author: page.book.author,
         pageNumber: page.page_number,
         improvedText: improvedText,
-      }
+      },
+      remainingCredits // Tambahkan sisa kredit ke response
     });
 
   } catch (error) {
