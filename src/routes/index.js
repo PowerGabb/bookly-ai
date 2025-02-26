@@ -7,6 +7,7 @@ import categoryRoutes from "./categoryRoutes.js";
 import profileRoutes from "./profileRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
 import aiRoutes from "./aiRoutes.js";
+import eventRoutes from "./eventRoutes.js";
 
 const router = express.Router();
 
@@ -17,6 +18,7 @@ router.use("/category", categoryRoutes);
 router.use("/profile", profileRoutes)
 router.use("/payment", paymentRoutes)
 router.use("/ai", aiRoutes)
+router.use("/events", eventRoutes)
 
 router.use("*", (req, res) => {
     errorResponse(res, "Route not found", 404);
