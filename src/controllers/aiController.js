@@ -97,11 +97,13 @@ export const askPage = async (req, res) => {
       // Buat system message baru jika belum ada
       const systemMessage = {
         role: "system",
-        content: `Anda adalah asisten yang membantu menjawab pertanyaan tentang buku "${page.book.title}" oleh ${page.book.author}. 
-                Anda memiliki akses ke seluruh konteks buku dan dapat menjawab pertanyaan dari berbagai halaman.
-                Saat ini user sedang membaca halaman ${pageNumber} dengan konten:
+        content: `You are an assistant helping to answer questions about the book "${page.book.title}" by ${page.book.author}.
+                You have access to the entire book context and can answer questions from various pages.
+                Currently the user is reading page ${pageNumber} with content:
 
-                ${page.text}`,
+                ${page.text}
+
+                Please respond in the same language as the user's question - if they ask in Indonesian, respond in Indonesian. If they ask in English, respond in English.`,
       };
 
       const savedSystemMessage = await prisma.chatHistory.create({
