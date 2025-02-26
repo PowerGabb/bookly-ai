@@ -37,6 +37,7 @@ model User {
   reads      BookRead[]
   saved      BookSaved[]
   chatHistory ChatHistory[]
+  creditTransactions CreditTransaction[]
   audioFiles   BookAudio[]
 }
 
@@ -214,4 +215,31 @@ model Event {
   order       Int      @default(0)  // Untuk mengatur urutan tampilan
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model CreditTransaction {
+  id                Int      @id @default(autoincrement())
+  order_id          String   @unique
+  user_id           String
+  amount            Int
+  credit_type       String   // AI_CHAT atau TTS
+  credit_amount     Int      // Jumlah kredit yang dibeli
+  status            String   // PENDING, SUCCESS, FAILED
+  snap_token        String?
+  payment_details   Json?    @db.JsonB
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  user              User     @relation(fields: [user_id], references: [id])
+}
+
+model CreditPackage {
+  id            Int      @id @default(autoincrement())
+  name          String
+  credit_type   String   // AI_CHAT atau TTS
+  credits       Int      // Jumlah kredit
+  price         Int      // Harga dalam Rupiah
+  description   String?  // Deskripsi paket (opsional)
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
 }
