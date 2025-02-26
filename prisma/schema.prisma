@@ -187,7 +187,8 @@ model BookAudio {
   page_number  Int
   file_url     String
   voice        String   // alloy, echo, fable, onyx, nova, shimmer
-  style        String   // default, storyteller, professional, casual, dramatic
+  style        String   // default, natural, professional
+  language     String   @default("en") // en, in
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
   part         Int      @default(1)
@@ -198,19 +199,5 @@ model BookAudio {
   @@index([user_id])
   @@index([book_id])
   @@index([page_number])
-}
-
-model Voice {
-  id            Int      @id @default(autoincrement())
-  name          String
-  speaker_id    String   @unique
-  language      String
-  gender        String?
-  classification String
-  description   String?  @db.Text
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
   @@index([language])
-  @@index([classification])
 }

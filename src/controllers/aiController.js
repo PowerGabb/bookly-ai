@@ -243,22 +243,13 @@ export const textToSpeech = async (req, res) => {
   const {
     bookId,
     pageNumber,
-    speaker = "00151554-3826-11ee-a861-00163e2ac61b",
-    emotion = "Neutral",
+    speaker,
     style = "default",
+    language = "en"  // Default bahasa Inggris
   } = req.body;
   const userId = req.user.id;
 
   try {
-    console.log("Starting TTS process with params:", {
-      bookId,
-      pageNumber,
-      speaker,
-      emotion,
-      style,
-    });
-
-    // Ambil konten halaman dari database
     const page = await prisma.bookPage.findFirst({
       where: {
         book_id: parseInt(bookId),
@@ -278,108 +269,74 @@ export const textToSpeech = async (req, res) => {
       return errorResponse(res, "Halaman tidak ditemukan", 404);
     }
 
-    console.log("Page content length:", page.text.length);
+    // Sesuaikan prompt berdasarkan bahasa
+    const systemPrompt = language === "in" 
+      ? `Anda adalah ahli dalam mengoptimalkan teks Bahasa Indonesia untuk dibacakan. 
+         Sesuaikan teks berikut agar lebih natural dan enak didengar dalam Bahasa Indonesia.
+         Tambahkan tanda baca yang sesuai dan perbaiki struktur kalimat jika perlu.
+         Pastikan teks tetap mempertahankan makna aslinya namun lebih mengalir saat dibacakan.`
+      : `You are an expert in optimizing English text for speech.
+         Adjust the following text to make it more natural and pleasant to hear in English.
+         Add appropriate punctuation and improve sentence structure if needed.
+         Ensure the text maintains its original meaning while flowing better when spoken.`;
 
-    // Gunakan GPT untuk memperbaiki teks
-    let improvedText = page.text;
-    if (style !== "default") {
-      console.log("Improving text with GPT...");
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `Anda adalah ahli dalam mengoptimalkan teks untuk dibacakan. 
-                        Sesuaikan teks berikut untuk gaya pembacaan "${style}" tanpa mengubah makna aslinya.
-                        Tambahkan tanda baca yang sesuai untuk memudahkan pembacaan.`,
-          },
-          {
-            role: "user",
-            content: page.text,
-          },
-        ],
-        max_tokens: 500,
-      });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: page.text,
+        },
+      ],
+    });
 
-      improvedText = completion.choices[0].message.content;
-      console.log("Improved text length:", improvedText.length);
+    const improvedText = completion.choices[0].message.content;
+
+    const audioResponse = await openai.audio.speech.create({
+      model: "tts-1",
+      voice: speaker,
+      input: improvedText,
+    });
+
+    const buffer = Buffer.from(await audioResponse.arrayBuffer());
+    const audioFileName = `audio_${bookId}_${pageNumber}_${language}_${Date.now()}.mp3`;
+    const audioPath = path.join("uploads", "audios", audioFileName);
+    
+    if (!fs.existsSync(path.join("uploads", "audios"))) {
+      fs.mkdirSync(path.join("uploads", "audios"), { recursive: true });
     }
 
-    // Pecah teks menjadi bagian-bagian 500 karakter
-    const textChunks = improvedText.match(/.{1,500}(\s|$)/g) || [];
-    console.log("Number of chunks:", textChunks.length);
-    const audioUrls = [];
-    let speakerName = "";
+    fs.writeFileSync(audioPath, buffer);
 
-    // Proses setiap chunk
-    for (let i = 0; i < textChunks.length; i++) {
-      const chunk = textChunks[i];
-      console.log(`Processing chunk ${i + 1}/${textChunks.length}, length: ${chunk.length}`);
-      
-      try {
-        const response = await makeRequestWithRetry(chunk, speaker, emotion);
-        console.log(`Chunk ${i + 1} response:`, response.data);
-        audioUrls.push(response.data.data.oss_url);
-        if (!speakerName) speakerName = response.data.data.name;
-        
-        // Tambahkan delay antara requests
-        if (i < textChunks.length - 1) {
-          await delay(1000); // Tunggu 1 detik antara requests
-        }
-      } catch (chunkError) {
-        console.error(`Error processing chunk ${i + 1}:`, chunkError.response?.data || chunkError.message);
-        throw chunkError;
-      }
-    }
-
-    console.log("All chunks processed, saving to database...");
-
-    // Simpan semua URL audio ke database
-    const audioRecords = await Promise.all(
-      audioUrls.map((url, index) =>
-        prisma.bookAudio.create({
-          data: {
-            user_id: userId,
-            book_id: parseInt(bookId),
-            page_number: parseInt(pageNumber),
-            file_url: url,
-            voice: speakerName,
-            style: style,
-            part: index + 1,
-          },
-        })
-      )
-    );
-
-    console.log("Successfully saved to database");
+    const audioRecord = await prisma.bookAudio.create({
+      data: {
+        user_id: userId,
+        book_id: parseInt(bookId),
+        page_number: parseInt(pageNumber),
+        file_url: `/uploads/audios/${audioFileName}`,
+        voice: speaker,
+        style: style,
+        language: language,
+        part: 1,
+      },
+    });
 
     return successResponse(res, "Berhasil menghasilkan audio", 200, {
-      audioUrls: audioUrls,
+      audio: audioRecord,
       pageInfo: {
         bookTitle: page.book.title,
         author: page.book.author,
         pageNumber: page.page_number,
         improvedText: improvedText,
-        speakerName: speakerName,
-        totalParts: audioUrls.length,
-      },
-      audioIds: audioRecords.map((record) => record.id),
+      }
     });
+
   } catch (error) {
-    console.error("Error in textToSpeech:", {
-      message: error.message,
-      response: error.response?.data,
-      stack: error.stack,
-    });
-
-    if (error.response?.status === 422) {
-      return errorResponse(
-        res,
-        "Format request tidak valid: " + JSON.stringify(error.response.data),
-        422
-      );
-    }
-
+    console.error("Error in textToSpeech:", error);
     return errorResponse(
       res,
       `Terjadi kesalahan pada server: ${error.message}`,
@@ -388,21 +345,26 @@ export const textToSpeech = async (req, res) => {
   }
 };
 
-// Endpoint untuk mendapatkan daftar audio yang sudah dibuat
+// Update getPageAudios untuk menambahkan filter language
 export const getPageAudios = async (req, res) => {
   const { bookId, pageNumber } = req.params;
-  const userId = req.user.id;
-
+  const { language = "en" } = req.query;  // Default ke bahasa Inggris
+  console.log(req.query);
   try {
     const audios = await prisma.bookAudio.findMany({
       where: {
-        user_id: userId,
         book_id: parseInt(bookId),
         page_number: parseInt(pageNumber),
+        language: language
       },
-      orderBy: {
-        created_at: "desc",
-      },
+      orderBy: [
+        {
+          voice: 'asc',
+        },
+        {
+          part: 'asc',
+        }
+      ],
     });
 
     return successResponse(res, "Berhasil mengambil daftar audio", 200, {
