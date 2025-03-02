@@ -32,6 +32,9 @@ model User {
   otpVerifications   OtpVerification[]
   transactions       Transaction[]
   googleId           String?           @unique
+  referral_code      String?          @unique // Kode referral unik untuk setiap user
+  referrals_given    Referral[]       @relation("ReferralGiver")
+  referrals_used     Referral[]       @relation("ReferralUser")
 
   ratings    BookRating[]
   reads      BookRead[]
@@ -219,7 +222,7 @@ model Event {
 }
 
 model CreditTransaction {
-  id                Int      @id @default(autoincrement())
+  id                Int       @id @default(autoincrement())
   order_id          String   @unique
   user_id           String
   amount            Int
@@ -231,6 +234,12 @@ model CreditTransaction {
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
   user              User     @relation(fields: [user_id], references: [id])
+  referral_code     String?   // Tambahkan field ini
+  referrals         Referral[]
+  package_id        Int      // Tambahkan field ini
+  package           CreditPackage @relation(fields: [package_id], references: [id])
+
+  @@index([package_id])
 }
 
 model CreditPackage {
@@ -243,6 +252,7 @@ model CreditPackage {
   is_active     Boolean  @default(true)
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
+  transactions  CreditTransaction[] // Tambahkan ini untuk relasi balik
 }
 
 model CustomerSupportChat {
@@ -259,8 +269,24 @@ model CustomerSupportChat {
 
   @@index([user_id])
   @@index([admin_id])
+}
 
-  @@unique([user_id, admin_id])
-
+// Tambahkan model Referral
+model Referral {
+  id              String   @id @default(cuid())
+  referral_code   String
+  giver_id        String  // User yang memberikan referral
+  user_id         String  // User yang menggunakan referral
+  credit_type     String  // AI_CHAT atau TTS
+  credits_earned  Int     // Jumlah kredit yang didapat
+  transaction_id  Int     
+  created_at      DateTime @default(now())
   
+  giver           User    @relation("ReferralGiver", fields: [giver_id], references: [id])
+  user            User    @relation("ReferralUser", fields: [user_id], references: [id])
+  transaction     CreditTransaction @relation(fields: [transaction_id], references: [id])
+
+  @@index([referral_code])
+  @@index([giver_id])
+  @@index([user_id])
 }
