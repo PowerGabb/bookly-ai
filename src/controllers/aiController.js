@@ -180,7 +180,7 @@ export const askPage = async (req, res) => {
     // Tambahkan pertanyaan user dengan konteks halaman
     const userMessage = {
       role: "user",
-      content: `[Halaman ${pageNumber}] ${question}`,
+      content: question
     };
 
     // Simpan pertanyaan user ke database
