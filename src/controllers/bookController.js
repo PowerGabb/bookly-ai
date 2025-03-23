@@ -375,7 +375,7 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
 }
 
 export const getBook = async (req, res) => {
-    const { page, limit, search, categories } = req.query;
+    const { page, limit, search, categories, sort } = req.query;
     const pageNumber = parseInt(page) || 1;
     const pageSize = parseInt(limit) || 10;
 
@@ -419,6 +419,47 @@ export const getBook = async (req, res) => {
             };
         }
 
+        // Siapkan pengurutan
+        let orderBy = [];
+        if (sort) {
+            switch (sort) {
+                case 'newest':
+                    orderBy.push({ createdAt: 'desc' });
+                    break;
+                case 'oldest':
+                    orderBy.push({ createdAt: 'asc' });
+                    break;
+                case 'title-asc':
+                    orderBy.push({ title: 'asc' });
+                    break;
+                case 'title-desc':
+                    orderBy.push({ title: 'desc' });
+                    break;
+                case 'rating-desc':
+                    orderBy.push({
+                        ratings: {
+                            _avg: {
+                                rating: 'desc'
+                            }
+                        }
+                    });
+                    break;
+                case 'rating-asc':
+                    orderBy.push({
+                        ratings: {
+                            _avg: {
+                                rating: 'asc'
+                            }
+                        }
+                    });
+                    break;
+                default:
+                    orderBy.push({ createdAt: 'desc' });
+            }
+        } else {
+            orderBy.push({ createdAt: 'desc' });
+        }
+
         const books = await prisma.book.findMany({
             where: whereClause,
             include: {
@@ -430,6 +471,7 @@ export const getBook = async (req, res) => {
                 ratings: true,
                 reads: true
             },
+            orderBy,
             skip: (pageNumber - 1) * pageSize,
             take: pageSize
         });
