@@ -516,9 +516,12 @@ export const getBook = async (req, res) => {
 
 export const getBookById = async (req, res) => {
     const { bookId } = req.params;
+    
     try {
         const book = await prisma.book.findUnique({
-            where: { id: parseInt(bookId) },
+            where: {
+                id: parseInt(bookId) // Konversi string ke integer
+            },
             include: {
                 categories: {
                     include: {
@@ -531,31 +534,32 @@ export const getBookById = async (req, res) => {
         });
 
         if (!book) {
-            return errorResponse(res, "Book not found", 404);
+            return errorResponse(res, "Buku tidak ditemukan", 404);
         }
 
         // Hitung rata-rata rating
-        const totalRating = book.ratings.reduce((sum, rating) => sum + rating.rating, 0);
         const averageRating = book.ratings.length > 0
-            ? parseFloat((totalRating / book.ratings.length).toFixed(1))
+            ? book.ratings.reduce((acc, curr) => acc + curr.rating, 0) / book.ratings.length
             : 0;
 
-        // Transform data buku
-        const { ratings, reads, ...bookData } = book;
-        const transformedBook = {
-            ...bookData,
-            averageRating,
-            totalReads: reads.length,
-            totalRatings: ratings.length
+        // Format response
+        const formattedBook = {
+            ...book,
+            averageRating: parseFloat(averageRating.toFixed(1)),
+            totalRatings: book.ratings.length,
+            totalReads: book.reads.length,
+            ratings: undefined, // Hapus data rating mentah
+            reads: undefined // Hapus data reads mentah
         };
 
-        return successResponse(res, "Book fetched successfully", 200, {
-            book: transformedBook
+        return successResponse(res, "Buku berhasil diambil", 200, {
+            book: formattedBook
         });
     } catch (error) {
+        console.error("Error in getBookById:", error);
         return errorResponse(res, error.message, 500);
     }
-}
+};
 
 export const getPages = async (req, res) => {
     const { bookId } = req.params;
@@ -995,4 +999,71 @@ export const getSaved = async (req, res) => {
         return errorResponse(res, error.message, 500);
     }
 }
+
+export const getReadingHistory = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        // Ambil riwayat baca
+        const readHistory = await prisma.bookRead.findMany({
+            where: {
+                user_id: userId
+            },
+            include: {
+                book: {
+                    select: {
+                        id: true,
+                        title: true,
+                        author: true,
+                        coverImage: true,
+                        pageCount: true
+                    }
+                }
+            },
+            orderBy: {
+                read_at: 'desc'
+            }
+        });
+
+        // Ambil buku yang disimpan
+        const savedBooks = await prisma.bookSaved.findMany({
+            where: {
+                user_id: userId
+            },
+            include: {
+                book: {
+                    select: {
+                        id: true,
+                        title: true,
+                        author: true,
+                        coverImage: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+
+        return successResponse(res, "Riwayat berhasil diambil", 200, {
+            readHistory: readHistory.map(history => ({
+                id: history.book.id,
+                title: history.book.title,
+                author: history.book.author,
+                coverImage: history.book.coverImage,
+                lastRead: history.read_at,
+                pageCount: history.book.pageCount
+            })),
+            savedBooks: savedBooks.map(saved => ({
+                id: saved.book.id,
+                title: saved.book.title,
+                author: saved.book.author,
+                coverImage: saved.book.coverImage,
+                savedAt: saved.createdAt
+            }))
+        });
+    } catch (error) {
+        return errorResponse(res, error.message, 500);
+    }
+};
 
