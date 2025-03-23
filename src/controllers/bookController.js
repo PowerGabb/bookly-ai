@@ -436,22 +436,9 @@ export const getBook = async (req, res) => {
                     orderBy.push({ title: 'desc' });
                     break;
                 case 'rating-desc':
-                    orderBy.push({
-                        ratings: {
-                            _avg: {
-                                rating: 'desc'
-                            }
-                        }
-                    });
-                    break;
                 case 'rating-asc':
-                    orderBy.push({
-                        ratings: {
-                            _avg: {
-                                rating: 'asc'
-                            }
-                        }
-                    });
+                    // Tidak menggunakan orderBy di sini karena akan diurutkan setelah fetch
+                    orderBy.push({ createdAt: 'desc' }); // default sort
                     break;
                 default:
                     orderBy.push({ createdAt: 'desc' });
@@ -476,8 +463,8 @@ export const getBook = async (req, res) => {
             take: pageSize
         });
 
-        // Transform data untuk menyederhanakan ratings dan reads
-        const transformedBooks = books.map(book => {
+        // Transform data dan hitung rata-rata rating
+        let transformedBooks = books.map(book => {
             // Hitung rata-rata rating
             const totalRating = book.ratings.reduce((sum, rating) => sum + rating.rating, 0);
             const averageRating = book.ratings.length > 0
@@ -494,6 +481,13 @@ export const getBook = async (req, res) => {
                 totalRatings: ratings.length
             };
         });
+
+        // Urutkan berdasarkan rating jika diperlukan
+        if (sort === 'rating-desc') {
+            transformedBooks.sort((a, b) => b.averageRating - a.averageRating);
+        } else if (sort === 'rating-asc') {
+            transformedBooks.sort((a, b) => a.averageRating - b.averageRating);
+        }
 
         // Hitung total items dengan filter yang sama
         const totalItems = await prisma.book.count({
