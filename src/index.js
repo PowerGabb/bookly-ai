@@ -34,6 +34,6 @@ setupSocketHandlers(io);
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on port ke ntar berapa ${PORT}`);
   console.log(`Socket.IO server is ready at ws://localhost:${PORT}`);
 }); 
