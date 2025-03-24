@@ -107,56 +107,59 @@ export const handleCallback = async (req, res) => {
 
   try {
     event = stripe.webhooks.constructEvent(
-      req.rawBody, 
+      req.body, 
       sig, 
       process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return errorResponse(res, `Webhook Error: ${err.message}`, 400);
+    console.error('Error processing webhook:', err);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    console.log('Session data:', JSON.stringify(session, null, 2));
-    
-    // Validasi data yang diperlukan
-    if (!session.metadata?.userId || !session.metadata?.subscriptionType) {
-      console.error('Missing required metadata:', session.metadata);
-      return errorResponse(res, 'Missing required metadata', 400);
-    }
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      console.log('Session data:', JSON.stringify(session, null, 2));
+      
+      // Validasi data yang diperlukan
+      if (!session.metadata?.userId || !session.metadata?.subscriptionType) {
+        console.error('Missing required metadata:', session.metadata);
+        return res.status(400).send('Missing required metadata');
+      }
 
-    try {
-      // Update transaction status
-      const transaction = await prisma.transaction.update({
-        where: { order_id: session.id },
-        data: { 
-          status: "SUCCESS",
-          payment_intent: session.payment_intent
-        },
-      });
+      try {
+        // Update transaction status
+        const transaction = await prisma.transaction.update({
+          where: { order_id: session.id },
+          data: { 
+            status: "SUCCESS",
+            payment_intent: session.payment_intent
+          },
+        });
 
-      console.log('Transaction updated:', transaction);
+        console.log('Transaction updated:', transaction);
 
-      // Update user subscription
-      const user = await prisma.user.update({
-        where: { id: session.metadata.userId },
-        data: { 
-          subscription_level: parseInt(session.metadata.subscriptionType),
-          subscription_expire_date: new Date(Date.now() + (parseInt(session.metadata.subscriptionType) === 1 ? 30 : 365) * 24 * 60 * 60 * 1000)
-        },
-      });
+        // Update user subscription
+        const user = await prisma.user.update({
+          where: { id: session.metadata.userId },
+          data: { 
+            subscription_level: parseInt(session.metadata.subscriptionType),
+            subscription_expire_date: new Date(Date.now() + (parseInt(session.metadata.subscriptionType) === 1 ? 30 : 365) * 24 * 60 * 60 * 1000)
+          },
+        });
 
-      console.log('User subscription updated:', user);
+        console.log('User subscription updated:', user);
+        break;
+      } catch (error) {
+        console.error('Database update failed:', error);
+        return res.status(500).send('Failed to update database');
+      }
 
-      return successResponse(res, "Webhook processed successfully", 200);
-    } catch (error) {
-      console.error('Database update failed:', error);
-      return errorResponse(res, 'Failed to update database', 500);
-    }
+    default:
+      console.log(`Unhandled event type ${event.type}`);
   }
 
-  return successResponse(res, "Webhook processed", 200);
+  res.status(200).end();
 };
 
 export const getStatus = async (req, res) => {
