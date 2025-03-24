@@ -7,6 +7,4 @@ node_modules/*
 /uploads/processed/*
 /uploads/waiting-process/*
 /uploads/audios/*
-
-
 /uploads/events/*

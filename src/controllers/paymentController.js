@@ -102,13 +102,12 @@ export const createPayment = async (req, res) => {
 };
 
 export const handleCallback = async (req, res) => {
-  console.log('Webhook body:', JSON.stringify(req.body, null, 2));
   const sig = req.headers['stripe-signature'];
   let event;
 
   try {
     event = stripe.webhooks.constructEvent(
-      req.rawBody, 
+      req.body, 
       sig, 
       process.env.STRIPE_WEBHOOK_SECRET
     );
@@ -141,7 +140,7 @@ export const handleCallback = async (req, res) => {
 
       // Update user subscription
       const user = await prisma.user.update({
-        where: { id: parseInt(session.metadata.userId) },
+        where: { id: session.metadata.userId },
         data: { 
           subscription_level: parseInt(session.metadata.subscriptionType),
           subscription_expire_date: new Date(Date.now() + (parseInt(session.metadata.subscriptionType) === 1 ? 30 : 365) * 24 * 60 * 60 * 1000)

@@ -5,7 +5,12 @@ import { isAuth } from "../middleware/isAuth.js";
 const paymentRoutes = express.Router();
 
 // Middleware khusus untuk Stripe webhook
-const stripeWebhookMiddleware = express.raw({ type: 'application/json' });
+const stripeWebhookMiddleware = express.raw({ 
+  type: 'application/json',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+});
 
 paymentRoutes.post("/create", isAuth, createPayment);
 paymentRoutes.post("/webhook", stripeWebhookMiddleware, handleCallback);
