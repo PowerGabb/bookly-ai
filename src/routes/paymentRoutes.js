@@ -14,7 +14,7 @@ const stripeWebhookMiddleware = express.raw({
 });
 
 paymentRoutes.post("/create", isAuth, createPayment);
-paymentRoutes.post("/webhook", bodyParser.raw({type: 'application/json'}), handleCallback);
+paymentRoutes.post("/webhook", stripeWebhookMiddleware, handleCallback);
 paymentRoutes.get("/status/:sessionId", isAuth, getStatus);
 paymentRoutes.get("/pending", isAuth, getPendingTransaction);
 
