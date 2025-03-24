@@ -23,6 +23,10 @@ io.on('connection', (socket) => {
   console.log('New socket connection established');
 });
 
+// Middleware untuk webhook Stripe
+app.use('/api/payment/webhook', express.raw({type: 'application/json'}));
+
+// Middleware untuk route lainnya
 app.use(express.json());
 app.use(cors({
   origin: '*',
