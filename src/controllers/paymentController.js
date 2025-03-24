@@ -1,44 +1,36 @@
 import prisma from "../utils/prisma.js";
-import midtransClient from "midtrans-client";
+import Stripe from 'stripe';
 import { errorResponse } from "../libs/errorResponse.js";
 import { successResponse } from "../libs/successResponse.js";
 
-// Inisialisasi Snap
-let snap = new midtransClient.Snap({
-  isProduction: false,
-  serverKey: process.env.MIDTRANS_SERVER_KEY,
-  clientKey: process.env.MIDTRANS_CLIENT_KEY,
-});
-
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export const createPayment = async (req, res) => {
   try {
     const { subscription_type } = req.body;
     const userId = req.user.id;
 
-    // Validasi input
     if (!subscription_type) {
       return errorResponse(res, "subscription_type is required", 400);
     }
 
     // Get subscription details
     const subscriptionDetails = {
-      1: { name: "Pro Plan", price: 75000 },
-      2: { name: "Premium Plan", price: 225000 },
+      1: { name: "Pro Plan", price: 9.90, priceId: process.env.STRIPE_PRO_PRICE_ID },
+      2: { name: "Premium Plan", price: 17.90, priceId: process.env.STRIPE_PREMIUM_PRICE_ID },
     }[subscription_type];
 
     if (!subscriptionDetails) {
       return errorResponse(res, "Invalid subscription type", 400);
     }
 
-    // Cek transaksi yang sudah ada dengan subscription type yang sama
+    // Cek transaksi yang sudah ada
     const existingTransaction = await prisma.transaction.findFirst({
       where: {
         user_id: userId,
         subscription_type: subscription_type,
         status: "PENDING",
         created_at: {
-          // Cek transaksi yang dibuat dalam 24 jam terakhir
           gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
         },
       },
@@ -47,52 +39,61 @@ export const createPayment = async (req, res) => {
       },
     });
 
-    // Jika ada transaksi yang masih valid, gunakan yang sudah ada
-    if (existingTransaction && existingTransaction.snap_token) {
-      return successResponse(res, "Using existing payment", 200, {
-        token: existingTransaction.snap_token,
-        redirect_url: existingTransaction.payment_details.redirect_url,
-      });
+    if (existingTransaction && existingTransaction.payment_intent_id) {
+      const session = await stripe.checkout.sessions.retrieve(
+        existingTransaction.payment_intent_id
+      );
+      
+      if (session.status === "open") {
+        return successResponse(res, "Using existing payment", 200, {
+          sessionId: session.id,
+          url: session.url
+        });
+      }
     }
 
-    // Jika tidak ada transaksi yang valid, buat baru
-    const orderId = `ORDER-${Date.now()}`;
-    const snapResponse = await snap.createTransaction({
-      transaction_details: {
-        order_id: orderId,
-        gross_amount: subscriptionDetails.price,
-      },
-      customer_details: {
-        first_name: req.user.name,
-        email: req.user.email,
-        phone: req.user.phone,
-      },
-      item_details: [
+    // Buat Stripe Checkout Session baru
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
         {
-          id: `SUB-${subscription_type}`,
-          price: subscriptionDetails.price,
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: subscriptionDetails.name,
+              description: `${subscriptionDetails.name} subscription for Bookly AI`,
+            },
+            unit_amount: Math.round(subscriptionDetails.price * 100),
+          },
           quantity: 1,
-          name: subscriptionDetails.name,
         },
       ],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL}/subscription/success`,
+      cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
+      customer_email: req.user.email,
+      metadata: {
+        userId: userId.toString(),
+        subscriptionType: subscription_type.toString()
+      }
     });
 
     // Simpan transaksi baru
     await prisma.transaction.create({
       data: {
-        order_id: orderId,
+        order_id: session.id,
         user_id: userId,
         amount: subscriptionDetails.price,
         subscription_type: subscription_type,
         status: "PENDING",
-        snap_token: snapResponse.token,
-        payment_details: snapResponse,
+        payment_intent_id: session.id,
+        payment_details: session
       },
     });
 
     return successResponse(res, "Payment initiated successfully", 200, {
-      token: snapResponse.token,
-      redirect_url: snapResponse.redirect_url,
+      sessionId: session.id,
+      url: session.url
     });
   } catch (error) {
     console.error("Payment error:", error);
@@ -101,47 +102,70 @@ export const createPayment = async (req, res) => {
 };
 
 export const handleCallback = async (req, res) => {
+  console.log('Webhook body:', JSON.stringify(req.body, null, 2));
+  const sig = req.headers['stripe-signature'];
+  let event;
+
   try {
-    const { order_id, transaction_status, fraud_status } = req.body;
-
-    let status;
-    if (transaction_status == "capture") {
-      status = fraud_status == "accept" ? "SUCCESS" : "CHALLENGE";
-    } else if (transaction_status == "settlement") {
-      status = "SUCCESS";
-    } else if (["cancel", "deny", "expire"].includes(transaction_status)) {
-      status = "FAILED";
-    } else if (transaction_status == "pending") {
-      status = "PENDING";
-    }
-
-    // Update transaction status
-    const transaction = await prisma.transaction.update({
-      where: { order_id },
-      data: { status },
-    });
-
-    // If payment successful, update user subscription
-    if (status === "SUCCESS") {
-      await prisma.user.update({
-        where: { id: transaction.user_id },
-        data: { subscription_level: transaction.subscription_type },
-      });
-    }
-
-    return successResponse(res, "Callback processed", 200);
-  } catch (error) {
-    console.error("Callback error:", error);
-    return errorResponse(res, error.message, 500);
+    event = stripe.webhooks.constructEvent(
+      req.rawBody, 
+      sig, 
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return errorResponse(res, `Webhook Error: ${err.message}`, 400);
   }
+
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    console.log('Session data:', JSON.stringify(session, null, 2));
+    
+    // Validasi data yang diperlukan
+    if (!session.metadata?.userId || !session.metadata?.subscriptionType) {
+      console.error('Missing required metadata:', session.metadata);
+      return errorResponse(res, 'Missing required metadata', 400);
+    }
+
+    try {
+      // Update transaction status
+      const transaction = await prisma.transaction.update({
+        where: { order_id: session.id },
+        data: { 
+          status: "SUCCESS",
+          payment_intent: session.payment_intent
+        },
+      });
+
+      console.log('Transaction updated:', transaction);
+
+      // Update user subscription
+      const user = await prisma.user.update({
+        where: { id: parseInt(session.metadata.userId) },
+        data: { 
+          subscription_level: parseInt(session.metadata.subscriptionType),
+          subscription_expire_date: new Date(Date.now() + (parseInt(session.metadata.subscriptionType) === 1 ? 30 : 365) * 24 * 60 * 60 * 1000)
+        },
+      });
+
+      console.log('User subscription updated:', user);
+
+      return successResponse(res, "Webhook processed successfully", 200);
+    } catch (error) {
+      console.error('Database update failed:', error);
+      return errorResponse(res, 'Failed to update database', 500);
+    }
+  }
+
+  return successResponse(res, "Webhook processed", 200);
 };
 
 export const getStatus = async (req, res) => {
   try {
-    const { token } = req.params;
+    const { sessionId } = req.params;
 
     const transaction = await prisma.transaction.findFirst({
-      where: { snap_token: token },
+      where: { payment_intent_id: sessionId },
     });
 
     if (!transaction) {
@@ -152,77 +176,30 @@ export const getStatus = async (req, res) => {
       return errorResponse(res, "Unauthorized", 403);
     }
 
-    try {
-      const response = await fetch(
-        `${process.env.MIDTRANS_API_URL}/v1/transactions/${transaction.snap_token}/status`,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            Authorization:
-              "Basic " +
-              Buffer.from(process.env.MIDTRANS_SERVER_KEY + ":").toString(
-                "base64"
-              ),
-          },
-        }
-      );
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    let status = transaction.status;
 
-      const statusData = await response.json();
-
-      let status = transaction.status;
-      if (
-        statusData.transaction_status === "settlement" ||
-        statusData.transaction_status === "capture"
-      ) {
-        status = "SUCCESS";
-
-        await prisma.user.update({
-          where: { id: transaction.user_id },
-          data: { subscription_level: transaction.subscription_type },
-        });
-      } else if (statusData.transaction_status === "pending") {
-        status = "PENDING";
-      } else if (
-        ["deny", "cancel", "expire"].includes(statusData.transaction_status)
-      ) {
-        status = "FAILED";
-      }
-
-      if (status !== transaction.status) {
-        await prisma.transaction.update({
-          where: { id: transaction.id },
-          data: { status },
-        });
-
-        if (status === "SUCCESS") {
-          await prisma.user.update({
-            where: { id: transaction.user_id },
-            data: { subscription_level: transaction.subscription_type },
-          });
-        }
-      }
-
-      return successResponse(res, "Payment status retrieved", 200, {
-        transaction_id: transaction.id,
-        order_id: transaction.order_id,
-        status: status,
-        payment_details: transaction.payment_details,
-      });
-    } catch (midtransError) {
-      console.error("Midtrans status error:", midtransError);
-      return successResponse(
-        res,
-        "Payment status retrieved from database",
-        200,
-        {
-          transaction_id: transaction.id,
-          order_id: transaction.order_id,
-          status: transaction.status,
-          payment_details: transaction.payment_details,
-        }
-      );
+    if (session.payment_status === "paid") {
+      status = "SUCCESS";
+    } else if (session.status === "open") {
+      status = "PENDING";
+    } else {
+      status = "FAILED";
     }
+
+    if (status !== transaction.status) {
+      await prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status },
+      });
+    }
+
+    return successResponse(res, "Payment status retrieved", 200, {
+      transaction_id: transaction.id,
+      order_id: transaction.order_id,
+      status: status,
+      payment_details: session
+    });
   } catch (error) {
     console.error("Get status error:", error);
     return errorResponse(res, error.message, 500);
@@ -249,9 +226,13 @@ export const getPendingTransaction = async (req, res) => {
       return errorResponse(res, "No pending transaction found", 404);
     }
 
+    const session = await stripe.checkout.sessions.retrieve(
+      pendingTransaction.payment_intent_id
+    );
+
     return successResponse(res, "Pending transaction found", 200, {
-      token: pendingTransaction.payment_details.token,
-      redirect_url: pendingTransaction.payment_details.redirect_url,
+      sessionId: session.id,
+      url: session.url
     });
   } catch (error) {
     console.error("Get pending transaction error:", error);

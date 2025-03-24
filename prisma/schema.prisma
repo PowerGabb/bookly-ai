@@ -35,6 +35,8 @@ model User {
   referral_code      String?          @unique // Kode referral unik untuk setiap user
   referrals_given    Referral[]       @relation("ReferralGiver")
   referrals_used     Referral[]       @relation("ReferralUser")
+  stripe_customer_id    String?
+  stripe_subscription_id String?
 
   ratings    BookRating[]
   reads      BookRead[]
@@ -168,6 +170,8 @@ model Transaction {
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
   user              User     @relation(fields: [user_id], references: [id])
+  payment_intent_id     String?
+  stripe_subscription_id String?
 }
 
 model ChatHistory {
