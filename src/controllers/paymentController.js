@@ -145,7 +145,8 @@ export const handleCallback = async (req, res) => {
           where: { id: session.metadata.userId },
           data: { 
             subscription_level: parseInt(session.metadata.subscriptionType),
-            subscription_expire_date: new Date(Date.now() + (parseInt(session.metadata.subscriptionType) === 1 ? 30 : 365) * 24 * 60 * 60 * 1000)
+            stripe_customer_id: session.customer || null,
+            stripe_subscription_id: session.subscription || null
           },
         });
 
