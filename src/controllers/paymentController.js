@@ -133,7 +133,8 @@ export const handleCallback = async (req, res) => {
           where: { order_id: session.id },
           data: { 
             status: "SUCCESS",
-            payment_intent: session.payment_intent
+            payment_intent_id: session.payment_intent,
+            payment_details: session
           },
         });
 
