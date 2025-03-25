@@ -9,41 +9,42 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id                 String            @id @default(cuid())
-  name               String?
-  email              String            @unique
-  password           String?
-  role               String?           @default("user")
-  phone              String?           @unique
-  avatar_url         String?
-  subscription_level Int?              @default(0)
-  isActive           Boolean           @default(false)
-  activationToken    String?           @unique
-  ai_credit          Int?              @default(50)  // Kredit untuk AI chat
-  tts_credit         Int?              @default(5)  // Kredit untuk Text-to-Speech
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  otpVerifications   OtpVerification[]
-  transactions       Transaction[]
-  googleId           String?           @unique
-  referral_code      String?          @unique // Kode referral unik untuk setiap user
-  referrals_given    Referral[]       @relation("ReferralGiver")
-  referrals_used     Referral[]       @relation("ReferralUser")
-  stripe_customer_id    String?
-  stripe_subscription_id String?
+  id                       String            @id @default(cuid())
+  name                     String?
+  email                    String            @unique
+  password                 String?
+  role                     String?           @default("user")
+  phone                    String?           @unique
+  avatar_url               String?
+  subscription_level       Int?              @default(0)
+  isActive                 Boolean           @default(false)
+  activationToken          String?           @unique
+  ai_credit                Int?              @default(50) // Kredit untuk AI chat
+  tts_credit               Int?              @default(5) // Kredit untuk Text-to-Speech
+  subscription_expire_date DateTime?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  otpVerifications         OtpVerification[]
+  transactions             Transaction[]
+  googleId                 String?           @unique
+  referral_code            String?           @unique // Kode referral unik untuk setiap user
+  referrals_given          Referral[]        @relation("ReferralGiver")
+  referrals_used           Referral[]        @relation("ReferralUser")
+  stripe_customer_id       String?
+  stripe_subscription_id   String?
 
-  ratings    BookRating[]
-  reads      BookRead[]
-  saved      BookSaved[]
-  chatHistory ChatHistory[]
-  creditTransactions CreditTransaction[]
-  audioFiles   BookAudio[]
+  ratings              BookRating[]
+  reads                BookRead[]
+  saved                BookSaved[]
+  chatHistory          ChatHistory[]
+  creditTransactions   CreditTransaction[]
+  audioFiles           BookAudio[]
   customerSupportChats CustomerSupportChat[]
 }
 
@@ -65,13 +66,13 @@ model Book {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  pages      BookPage[]
-  categories BookCategory[]
-  ratings    BookRating[]
-  reads      BookRead[]
-  saved      BookSaved[]
+  pages       BookPage[]
+  categories  BookCategory[]
+  ratings     BookRating[]
+  reads       BookRead[]
+  saved       BookSaved[]
   chatHistory ChatHistory[]
-  audioFiles   BookAudio[]
+  audioFiles  BookAudio[]
 }
 
 model BookPage {
@@ -158,34 +159,34 @@ model OtpVerification {
 }
 
 model Transaction {
-  id                Int      @id @default(autoincrement())
-  order_id          String   @unique
-  user_id           String
-  amount            Int
-  subscription_type Int
-  status            String   // PENDING, SUCCESS, FAILED, CHALLENGE
-  payment_type      String?
-  snap_token        String?  // Tambahkan kolom ini
-  payment_details   Json?    @db.JsonB
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-  user              User     @relation(fields: [user_id], references: [id])
-  payment_intent_id     String?
+  id                     Int      @id @default(autoincrement())
+  order_id               String   @unique
+  user_id                String
+  amount                 Int
+  subscription_type      Int
+  status                 String // PENDING, SUCCESS, FAILED, CHALLENGE
+  payment_type           String?
+  snap_token             String? // Tambahkan kolom ini
+  payment_details        Json?    @db.JsonB
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+  user                   User     @relation(fields: [user_id], references: [id])
+  payment_intent_id      String?
   stripe_subscription_id String?
 }
 
 model ChatHistory {
-  id                String    @id @default(cuid())
+  id                String   @id @default(cuid())
   user_id           String
   book_id           Int
   page_number       Int
   parent_message_id String?
-  role              String    // system, user, atau assistant
-  content           String    @db.Text
-  created_at        DateTime  @default(now())
-  
-  user              User      @relation(fields: [user_id], references: [id])
-  book              Book      @relation(fields: [book_id], references: [id])
+  role              String // system, user, atau assistant
+  content           String   @db.Text
+  created_at        DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id])
+  book Book @relation(fields: [book_id], references: [id])
 
   @@index([user_id])
   @@index([book_id])
@@ -193,20 +194,20 @@ model ChatHistory {
 }
 
 model BookAudio {
-  id           Int      @id @default(autoincrement())
-  user_id      String
-  book_id      Int
-  page_number  Int
-  file_url     String
-  voice        String   // alloy, echo, fable, onyx, nova, shimmer
-  style        String   // default, natural, professional
-  language     String   @default("en") // en, in
-  created_at   DateTime @default(now())
-  updated_at   DateTime @updatedAt
-  part         Int      @default(1)
+  id          Int      @id @default(autoincrement())
+  user_id     String
+  book_id     Int
+  page_number Int
+  file_url    String
+  voice       String // alloy, echo, fable, onyx, nova, shimmer
+  style       String // default, natural, professional
+  language    String   @default("en") // en, in
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  part        Int      @default(1)
 
-  user         User     @relation(fields: [user_id], references: [id])
-  book         Book     @relation(fields: [book_id], references: [id])
+  user User @relation(fields: [user_id], references: [id])
+  book Book @relation(fields: [book_id], references: [id])
 
   @@index([user_id])
   @@index([book_id])
@@ -215,61 +216,61 @@ model BookAudio {
 }
 
 model Event {
-  id          Int      @id @default(autoincrement())
-  title       String
-  image_url   String
-  link        String?  // Optional, jika hero image bisa di-klik untuk mengarah ke halaman tertentu
-  active      Boolean  @default(true)
-  order       Int      @default(0)  // Untuk mengatur urutan tampilan
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  title     String
+  image_url String
+  link      String? // Optional, jika hero image bisa di-klik untuk mengarah ke halaman tertentu
+  active    Boolean  @default(true)
+  order     Int      @default(0) // Untuk mengatur urutan tampilan
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model CreditTransaction {
-  id                Int       @id @default(autoincrement())
-  order_id          String   @unique
-  user_id           String
-  amount            Int
-  credit_type       String   // AI_CHAT atau TTS
-  credit_amount     Int      // Jumlah kredit yang dibeli
-  status            String   // PENDING, SUCCESS, FAILED
-  snap_token        String?
-  payment_details   Json?    @db.JsonB
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-  user              User     @relation(fields: [user_id], references: [id])
-  referral_code     String?   // Tambahkan field ini
-  referrals         Referral[]
-  package_id        Int      // Tambahkan field ini
-  package           CreditPackage @relation(fields: [package_id], references: [id])
+  id              Int           @id @default(autoincrement())
+  order_id        String        @unique
+  user_id         String
+  amount          Int
+  credit_type     String // AI_CHAT atau TTS
+  credit_amount   Int // Jumlah kredit yang dibeli
+  status          String // PENDING, SUCCESS, FAILED
+  snap_token      String?
+  payment_details Json?         @db.JsonB
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  user            User          @relation(fields: [user_id], references: [id])
+  referral_code   String? // Tambahkan field ini
+  referrals       Referral[]
+  package_id      Int // Tambahkan field ini
+  package         CreditPackage @relation(fields: [package_id], references: [id])
 
   @@index([package_id])
 }
 
 model CreditPackage {
-  id            Int      @id @default(autoincrement())
-  name          String
-  credit_type   String   // AI_CHAT atau TTS
-  credits       Int      // Jumlah kredit
-  price         Int      // Harga dalam Rupiah
-  description   String?  // Deskripsi paket (opsional)
-  is_active     Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-  transactions  CreditTransaction[] // Tambahkan ini untuk relasi balik
+  id           Int                 @id @default(autoincrement())
+  name         String
+  credit_type  String // AI_CHAT atau TTS
+  credits      Int // Jumlah kredit
+  price        Int // Harga dalam Rupiah
+  description  String? // Deskripsi paket (opsional)
+  is_active    Boolean             @default(true)
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
+  transactions CreditTransaction[] // Tambahkan ini untuk relasi balik
 }
 
 model CustomerSupportChat {
-  id          String    @id @default(cuid())
-  user_id     String
-  admin_id    String?
-  message     String    @db.Text
-  is_admin    Boolean   @default(false)
-  status      String    @default("PENDING")
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
+  id         String   @id @default(cuid())
+  user_id    String
+  admin_id   String?
+  message    String   @db.Text
+  is_admin   Boolean  @default(false)
+  status     String   @default("PENDING")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
-  user        User      @relation(fields: [user_id], references: [id])
+  user User @relation(fields: [user_id], references: [id])
 
   @@index([user_id])
   @@index([admin_id])
@@ -277,18 +278,18 @@ model CustomerSupportChat {
 
 // Tambahkan model Referral
 model Referral {
-  id              String   @id @default(cuid())
-  referral_code   String
-  giver_id        String  // User yang memberikan referral
-  user_id         String  // User yang menggunakan referral
-  credit_type     String  // AI_CHAT atau TTS
-  credits_earned  Int     // Jumlah kredit yang didapat
-  transaction_id  Int     
-  created_at      DateTime @default(now())
-  
-  giver           User    @relation("ReferralGiver", fields: [giver_id], references: [id])
-  user            User    @relation("ReferralUser", fields: [user_id], references: [id])
-  transaction     CreditTransaction @relation(fields: [transaction_id], references: [id])
+  id             String   @id @default(cuid())
+  referral_code  String
+  giver_id       String // User yang memberikan referral
+  user_id        String // User yang menggunakan referral
+  credit_type    String // AI_CHAT atau TTS
+  credits_earned Int // Jumlah kredit yang didapat
+  transaction_id Int
+  created_at     DateTime @default(now())
+
+  giver       User              @relation("ReferralGiver", fields: [giver_id], references: [id])
+  user        User              @relation("ReferralUser", fields: [user_id], references: [id])
+  transaction CreditTransaction @relation(fields: [transaction_id], references: [id])
 
   @@index([referral_code])
   @@index([giver_id])
