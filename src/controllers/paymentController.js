@@ -7,7 +7,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export const createPayment = async (req, res) => {
   try {
-    const { subscription_type } = req.body;
+    const { subscription_type, referral_code } = req.body;
     const userId = req.user.id;
 
     if (!subscription_type) {
@@ -22,6 +22,27 @@ export const createPayment = async (req, res) => {
 
     if (!subscriptionDetails) {
       return errorResponse(res, "Invalid subscription type", 400);
+    }
+
+    // Cek apakah user sudah pernah berlangganan
+    const existingSubscription = await prisma.transaction.findFirst({
+      where: {
+        user_id: userId,
+        status: "SUCCESS"
+      }
+    });
+
+    // Jika referral code diberikan dan user belum pernah berlangganan
+    let discount = 0;
+    if (referral_code && !existingSubscription) {
+      const referrer = await prisma.user.findUnique({
+        where: { referral_code }
+      });
+
+      if (referrer) {
+        // Berikan diskon 10% untuk user baru
+        discount = Math.round(subscriptionDetails.price * 0.1 * 100);
+      }
     }
 
     // Cek transaksi yang sudah ada
@@ -63,7 +84,7 @@ export const createPayment = async (req, res) => {
               name: subscriptionDetails.name,
               description: `${subscriptionDetails.name} subscription for Bookly AI`,
             },
-            unit_amount: Math.round(subscriptionDetails.price * 100),
+            unit_amount: Math.round(subscriptionDetails.price * 100) - discount,
           },
           quantity: 1,
         },
@@ -74,7 +95,9 @@ export const createPayment = async (req, res) => {
       customer_email: req.user.email,
       metadata: {
         userId: userId.toString(),
-        subscriptionType: subscription_type.toString()
+        subscriptionType: subscription_type.toString(),
+        referralCode: referral_code || null,
+        discount: discount.toString()
       }
     });
 
@@ -87,7 +110,11 @@ export const createPayment = async (req, res) => {
         subscription_type: subscription_type,
         status: "PENDING",
         payment_intent_id: session.id,
-        payment_details: session
+        payment_details: {
+          ...session,
+          discount,
+          referral_code
+        }
       },
     });
 
@@ -98,6 +125,33 @@ export const createPayment = async (req, res) => {
   } catch (error) {
     console.error("Payment error:", error);
     return errorResponse(res, error.message, 500);
+  }
+};
+
+// Fungsi untuk mereset kredit user yang sudah expired
+const resetExpiredSubscriptionCredits = async (userId) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        subscription_level: true,
+        subscription_expire_date: true,
+      }
+    });
+
+    // Jika user adalah pro/premium dan subscription sudah expired
+    if (user.subscription_level > 0 && new Date() > new Date(user.subscription_expire_date)) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          subscription_level: 0,
+          ai_credit: 0,
+          tts_credit: 0,
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error resetting credits:', error);
   }
 };
 
@@ -128,6 +182,9 @@ export const handleCallback = async (req, res) => {
       }
 
       try {
+        // Reset kredit jika subscription sebelumnya sudah expired
+        await resetExpiredSubscriptionCredits(session.metadata.userId);
+
         // Update transaction status
         const transaction = await prisma.transaction.update({
           where: { order_id: session.id },
@@ -141,14 +198,54 @@ export const handleCallback = async (req, res) => {
         console.log('Transaction updated:', transaction);
 
         // Update user subscription
+        const subscriptionEndDate = new Date();
+        subscriptionEndDate.setMonth(subscriptionEndDate.getMonth() + 1); // Tambah 1 bulan
+
         const user = await prisma.user.update({
           where: { id: session.metadata.userId },
           data: { 
             subscription_level: parseInt(session.metadata.subscriptionType),
             stripe_customer_id: session.customer || null,
-            stripe_subscription_id: session.subscription || null
+            stripe_subscription_id: session.subscription || null,
+            subscription_expire_date: subscriptionEndDate,
+            ai_credit: 999999999,
+            tts_credit: 999999999
           },
         });
+
+        // Jika ada referral code dan pembayaran berhasil
+        if (session.metadata.referralCode) {
+          const referrer = await prisma.user.findUnique({
+            where: { referral_code: session.metadata.referralCode }
+          });
+
+          if (referrer) {
+            // Berikan bonus kredit AI kepada referrer
+            await prisma.user.update({
+              where: { id: referrer.id },
+              data: {
+                ai_credit: {
+                  increment: 50 // Bonus 50 kredit AI
+                },
+                tts_credit: {
+                  increment: 50 // Bonus 50 kredit TTS
+                }
+              }
+            });
+
+            // Catat referral
+            await prisma.referral.create({
+              data: {
+                referral_code: session.metadata.referralCode,
+                giver_id: referrer.id,
+                user_id: session.metadata.userId,
+                credit_type: "AI_CHAT",
+                credits_earned: 50,
+                transaction_id: transaction.id
+              }
+            });
+          }
+        }
 
         console.log('User subscription updated:', user);
         break;
@@ -240,6 +337,85 @@ export const getPendingTransaction = async (req, res) => {
     });
   } catch (error) {
     console.error("Get pending transaction error:", error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+export const getSubscriptionPlans = async (req, res) => {
+  try {
+    const plans = {
+      1: { 
+        name: "Pro Plan", 
+        price: 9.90, 
+        priceId: process.env.STRIPE_PRO_PRICE_ID,
+        description: "Full access to all premium features",
+        features: [
+          "Unlimited books",
+          "HD audio quality",
+          "AI Chat with books",
+          "Offline mode",
+          "Exclusive content",
+          "Latest updates"
+        ],
+        period: "month"
+      },
+      2: { 
+        name: "Premium Plan", 
+        price: 17.90, 
+        priceId: process.env.STRIPE_PREMIUM_PRICE_ID,
+        description: "Save 20% with annual subscription",
+        features: [
+          "All Premium features",
+          "Save 20%",
+          "Priority access",
+          "Beta tester features"
+        ],
+        period: "year"
+      }
+    };
+
+    return successResponse(res, "Subscription plans retrieved successfully", 200, { plans });
+  } catch (error) {
+    console.error("Get subscription plans error:", error);
+    return errorResponse(res, error.message, 500);
+  }
+};
+
+export const checkAndResetExpiredSubscriptions = async (req, res) => {
+  try {
+    // Ambil semua user yang memiliki subscription_level > 0
+    const users = await prisma.user.findMany({
+      where: {
+        subscription_level: {
+          gt: 0
+        },
+        subscription_expire_date: {
+          not: null
+        }
+      }
+    });
+
+    let resetCount = 0;
+    for (const user of users) {
+      if (new Date() > new Date(user.subscription_expire_date)) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            subscription_level: 0,
+            ai_credit: 0,
+            tts_credit: 0,
+          }
+        });
+        resetCount++;
+      }
+    }
+
+    return successResponse(res, "Successfully checked and reset expired subscriptions", 200, {
+      total_checked: users.length,
+      total_reset: resetCount
+    });
+  } catch (error) {
+    console.error("Error checking expired subscriptions:", error);
     return errorResponse(res, error.message, 500);
   }
 };

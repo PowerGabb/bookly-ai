@@ -48,6 +48,23 @@ const makeRequestWithRetry = async (chunk, speaker, emotion, retries = 3, baseDe
 };
 
 const decrementCredit = async (userId, creditType) => {
+    // Cek user subscription terlebih dahulu
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            subscription_level: true,
+            ai_credit: true,
+            tts_credit: true,
+            subscription_expire_date: true
+        }
+    });
+
+    // Jika user adalah pro/premium dan masih dalam masa berlaku
+    if (user.subscription_level > 0 && new Date() < new Date(user.subscription_expire_date)) {
+        return creditType === 'AI_CHAT' ? user.ai_credit : user.tts_credit;
+    }
+
+    // Jika bukan pro/premium atau sudah expired, kurangi kredit
     const creditField = creditType === 'AI_CHAT' ? 'ai_credit' : 'tts_credit';
     const updatedUser = await prisma.user.update({
         where: { id: userId },

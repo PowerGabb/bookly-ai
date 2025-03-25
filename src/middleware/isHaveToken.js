@@ -12,8 +12,12 @@ export const isHaveCredit = (creditType) => {
                 where: { id: req.user.id }
             });
 
-            const creditField = creditType === 'AI_CHAT' ? 'ai_credit' : 'tts_credit';
+            // Jika user adalah pro/premium user, langsung lanjut
+            if (user.subscription_level > 0) {
+                return next();
+            }
 
+            const creditField = creditType === 'AI_CHAT' ? 'ai_credit' : 'tts_credit';
             
             if (!user || user[creditField] <= 0) {
                 return errorResponse(res, `Credits ${creditType} Is Not Enough`, 403);
