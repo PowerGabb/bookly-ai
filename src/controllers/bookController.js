@@ -3,13 +3,53 @@ import { successResponse } from "../libs/successResponse.js";
 import prisma from "../utils/prisma.js";
 import fs from "fs";
 import path from "path";
-import Tesseract from "tesseract.js";
+import { getTextExtractor } from 'office-text-extractor';
+import { readFile } from 'node:fs/promises';
 import sharp from "sharp";
 import { createRequire } from 'module';
+import OpenAI from "openai";
 const require = createRequire(import.meta.url);
 const pdfImgConvert = require('pdf-img-convert');
 
+const openai = new OpenAI({
+    apiKey: process.env.OPENAPI_KEY,
+});
+
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Fungsi untuk memperbaiki teks menggunakan OpenAI
+const improveText = async (text) => {
+    try {
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                {
+                    role: "system",
+                    content: `You are an expert in fixing messy or corrupted text.
+                    Your tasks are:
+                    1. Improve text formatting for better readability.
+                    2. Correct punctuation errors.
+                    3. Fix broken or incomplete words.
+                    4. Preserve the original meaning of the text.
+                    5. Remove unnecessary characters.
+                    6. Adjust sentence structure if needed.
+                    
+                    Provide the corrected text in a clean and readable format with no additional comments—only the improved text.`
+                },
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            max_tokens: 1000            
+        });
+
+        return completion.choices[0].message.content;
+    } catch (error) {
+        console.error("Error improving text:", error);
+        return text; // Jika gagal, kembalikan teks asli
+    }
+};
 
 export const createBook = async (req, res) => {
     const {
@@ -275,85 +315,49 @@ export const updateBook = async (req, res) => {
 
 const processBookPages = async (bookId, bookTitle, pdfPath) => {
     try {
-        const safeFolderName = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        const outputDir = path.join("uploads", "processed", safeFolderName);
-
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
         console.log(`[${bookTitle}] Starting PDF processing...`);
 
-        // Inisialisasi worker Tesseract
-        const worker = await Tesseract.createWorker('eng');
+        // Buat instance TextExtractor
+        const extractor = getTextExtractor();
 
-        // Konversi PDF ke array of images
-        const pdfArray = await pdfImgConvert.convert(pdfPath);
-        const totalPages = pdfArray.length;
-        console.log(`[${bookTitle}] Total pages to process: ${totalPages}`);
+        // Baca file PDF sebagai buffer
+        const buffer = await readFile(pdfPath);
 
-        // Proses dalam batch
-        const BATCH_SIZE = 5;
-        for (let i = 0; i < totalPages; i += BATCH_SIZE) {
-            const batchEnd = Math.min(i + BATCH_SIZE, totalPages);
+        // Ekstrak teks dari buffer PDF
+        const text = await extractor.extractText({ input: buffer, type: 'buffer' });
+        
+        // Split teks menjadi halaman-halaman (berdasarkan karakter newline)
+        const pages = text.split('\n\n')
+            .map(page => page.trim());
 
-            try {
-                // Proses setiap halaman dalam batch
-                for (let j = i; j < batchEnd; j++) {
-                    const pageNumber = j + 1;
-                    console.log(`[${bookTitle}] Processing page ${pageNumber} of ${totalPages}`);
-                    
-                    const fileName = `page-${pageNumber}.png`;
-                    const imagePath = path.join(outputDir, fileName);
-
-                    // Simpan gambar
-                    await fs.promises.writeFile(imagePath, pdfArray[j]);
-
-                    // Optimasi gambar
-                    await sharp(imagePath)
-                        .resize(1024, 1024, {
-                            fit: 'inside',
-                            withoutEnlargement: true
-                        })
-                        .toFile(path.join(outputDir, `optimized-${fileName}`));
-
-                    // Ganti file original dengan file yang dioptimasi
-                    fs.renameSync(
-                        path.join(outputDir, `optimized-${fileName}`),
-                        imagePath
-                    );
-
-                    // Proses OCR dan simpan ke database
-                    const { data: { text } } = await worker.recognize(imagePath);
-                    await prisma.bookPage.create({
-                        data: {
-                            book_id: bookId,
-                            page_number: pageNumber,
-                            image_url: `/uploads/processed/${safeFolderName}/${fileName}`,
-                            text: text
-                        }
-                    });
-                }
-
-                // Bersihkan memory setelah setiap batch
-                global.gc && global.gc();
-                await delay(1000);
-
-            } catch (error) {
-                console.error(`[${bookTitle}] Error in batch processing:`, error);
-                await delay(2000);
+        // Simpan setiap halaman ke database, termasuk yang kosong
+        for (let i = 0; i < pages.length; i++) {
+            const pageNumber = i + 1; // Mulai dari halaman 1
+            console.log(`[${bookTitle}] Processing page ${pageNumber} of ${pages.length}`);
+            
+            let pageText = pages[i].length > 0 ? pages[i] : null;
+            
+            // Jika halaman memiliki teks, perbaiki menggunakan OpenAI
+            if (pageText) {
+                console.log(`[${bookTitle}] Improving text for page ${pageNumber}...`);
+                pageText = await improveText(pageText);
             }
+            
+            await prisma.bookPage.create({
+                data: {
+                    book_id: bookId,
+                    page_number: pageNumber,
+                    text: pageText
+                }
+            });
         }
-
-        // Terminate Tesseract worker
-        await worker.terminate();
 
         // Update status buku
         await prisma.book.update({
             where: { id: bookId },
             data: {
                 processed: true,
-                processed_dir: `/uploads/processed/${safeFolderName}`
+                processed_dir: null
             }
         });
 
