@@ -825,6 +825,7 @@ export const createRating = async (req, res) => {
 
 export const createRead = async (req, res) => {
     const { bookId } = req.params;
+    const userId = req.user.id;
 
     try {
         // Cek apakah buku ada
@@ -836,15 +837,45 @@ export const createRead = async (req, res) => {
             return errorResponse(res, "Buku tidak ditemukan", 404);
         }
 
+        // Cek trial period user
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                createdAt: true,
+                subscription_level: true,
+                subscription_expire_date: true
+            }
+        });
+
+        if (!user) {
+            return errorResponse(res, "User tidak ditemukan", 404);
+        }
+
+        // Hitung selisih hari antara sekarang dan tanggal registrasi
+        const registrationDate = new Date(user.createdAt);
+        const currentDate = new Date();
+        const daysDifference = Math.floor((currentDate - registrationDate) / (1000 * 60 * 60 * 24));
+
+        console.log('Debug trial period:', {
+            registrationDate: registrationDate.toISOString(),
+            currentDate: currentDate.toISOString(),
+            daysDifference,
+            subscription_level: user.subscription_level
+        });
+
+        // Jika user bukan subscriber dan sudah lewat 14 hari
+        if (user.subscription_level === 0 && daysDifference > 14) {
+            return errorResponse(res, "Masa trial Anda telah berakhir. Silakan berlangganan untuk melanjutkan membaca.", 403);
+        }
+
         // Cek apakah user sudah membaca buku sebelumnya
         const existingRead = await prisma.bookRead.findFirst({
             where: {
                 book_id: parseInt(bookId),
-                user_id: req.user.id
+                user_id: userId
             }
         });
 
-        // jika sudah di baca maka tidak ush di tambahkan ke database
         if (existingRead) {
             return successResponse(res, "Buku sudah dibaca", 200);
         }
@@ -856,13 +887,14 @@ export const createRead = async (req, res) => {
                 },
                 read_at: new Date(),
                 user: {
-                    connect: { id: req.user.id }
+                    connect: { id: userId }
                 }
             }
         });
 
         return successResponse(res, "Buku berhasil dibaca", 200);
     } catch (error) {
+        console.error('Error in createRead:', error);
         return errorResponse(res, error.message, 500);
     }
 }
