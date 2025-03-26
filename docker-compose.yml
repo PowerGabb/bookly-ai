@@ -9,5 +9,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - HOST=0.0.0.0
     volumes:
-      - ./uploads:/app/uploads
+      - uploads_data:/app/uploads
     restart: unless-stopped
+
+volumes:
+  uploads_data:
