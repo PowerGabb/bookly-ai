@@ -164,6 +164,7 @@ const resetExpiredSubscriptionCredits = async (userId) => {
 };
 
 export const handleCallback = async (req, res) => {
+  console.log(req.body);
   try {
     const { order_id, transaction_status, fraud_status } = req.body;
 
