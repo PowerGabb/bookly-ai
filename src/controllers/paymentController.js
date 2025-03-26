@@ -1,9 +1,14 @@
 import prisma from "../utils/prisma.js";
-import Stripe from 'stripe';
 import { errorResponse } from "../libs/errorResponse.js";
 import { successResponse } from "../libs/successResponse.js";
+import midtransClient from 'midtrans-client';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+// Buat instance Midtrans
+const snap = new midtransClient.Snap({
+  isProduction: false,
+  serverKey: process.env.MIDTRANS_SERVER_KEY,
+  clientKey: process.env.MIDTRANS_CLIENT_KEY
+});
 
 export const createPayment = async (req, res) => {
   try {
@@ -16,13 +21,17 @@ export const createPayment = async (req, res) => {
 
     // Get subscription details
     const subscriptionDetails = {
-      1: { name: "Pro Plan", price: 9.90, priceId: process.env.STRIPE_PRO_PRICE_ID },
-      2: { name: "Premium Plan", price: 17.90, priceId: process.env.STRIPE_PREMIUM_PRICE_ID },
+      1: { name: "Pro Plan", price: 9.90 },
+      2: { name: "Premium Plan", price: 17.90 },
     }[subscription_type];
 
     if (!subscriptionDetails) {
       return errorResponse(res, "Invalid subscription type", 400);
     }
+
+    // Konversi harga dari dolar ke rupiah (1 USD = 16000 IDR)
+    const USD_TO_IDR = 16000;
+    const priceInIDR = Math.round(subscriptionDetails.price * USD_TO_IDR);
 
     // Cek apakah user sudah pernah berlangganan
     const existingSubscription = await prisma.transaction.findFirst({
@@ -41,7 +50,7 @@ export const createPayment = async (req, res) => {
 
       if (referrer) {
         // Berikan diskon 10% untuk user baru
-        discount = Math.round(subscriptionDetails.price * 0.1 * 100);
+        discount = Math.round(priceInIDR * 0.1);
       }
     }
 
@@ -60,67 +69,66 @@ export const createPayment = async (req, res) => {
       },
     });
 
-    if (existingTransaction && existingTransaction.payment_intent_id) {
-      const session = await stripe.checkout.sessions.retrieve(
-        existingTransaction.payment_intent_id
-      );
-      
-      if (session.status === "open") {
-        return successResponse(res, "Using existing payment", 200, {
-          sessionId: session.id,
-          url: session.url
-        });
-      }
+    if (existingTransaction && existingTransaction.snap_token) {
+      return successResponse(res, "Using existing payment", 200, {
+        token: existingTransaction.snap_token,
+        redirect_url: existingTransaction.payment_details.redirect_url,
+      });
     }
 
-    // Buat Stripe Checkout Session baru
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
+    // Buat order ID unik
+    const orderId = `SUB-${Date.now()}`;
+
+    // Buat parameter untuk Midtrans
+    const parameter = {
+      transaction_details: {
+        order_id: orderId,
+        gross_amount: priceInIDR - discount
+      },
+      customer_details: {
+        first_name: req.user.name,
+        email: req.user.email,
+        phone: req.user.phone
+      },
+      item_details: [
         {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: subscriptionDetails.name,
-              description: `${subscriptionDetails.name} subscription for Bookly AI`,
-            },
-            unit_amount: Math.round(subscriptionDetails.price * 100) - discount,
-          },
+          id: `SUB-${subscription_type}`,
+          price: priceInIDR - discount,
           quantity: 1,
-        },
+          name: `${subscriptionDetails.name} subscription`
+        }
       ],
-      mode: 'payment',
-      success_url: `${process.env.FRONTEND_URL}/subscription/success`,
-      cancel_url: `${process.env.FRONTEND_URL}/subscription/cancel`,
-      customer_email: req.user.email,
       metadata: {
         userId: userId.toString(),
         subscriptionType: subscription_type.toString(),
         referralCode: referral_code || null,
         discount: discount.toString()
       }
-    });
+    };
+
+    // Buat transaksi di Midtrans
+    const midtransResponse = await snap.createTransaction(parameter);
+
+    if (!midtransResponse.token) {
+      throw new Error('Failed to create Midtrans transaction');
+    }
 
     // Simpan transaksi baru
     await prisma.transaction.create({
       data: {
-        order_id: session.id,
+        order_id: orderId,
         user_id: userId,
         amount: subscriptionDetails.price,
         subscription_type: subscription_type,
         status: "PENDING",
-        payment_intent_id: session.id,
-        payment_details: {
-          ...session,
-          discount,
-          referral_code
-        }
+        snap_token: midtransResponse.token,
+        payment_details: midtransResponse
       },
     });
 
     return successResponse(res, "Payment initiated successfully", 200, {
-      sessionId: session.id,
-      url: session.url
+      token: midtransResponse.token,
+      redirect_url: midtransResponse.redirect_url
     });
   } catch (error) {
     console.error("Payment error:", error);
@@ -156,117 +164,136 @@ const resetExpiredSubscriptionCredits = async (userId) => {
 };
 
 export const handleCallback = async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body, 
-      sig, 
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.error('Error processing webhook:', err);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
+    const { order_id, transaction_status, fraud_status } = req.body;
 
-  switch (event.type) {
-    case 'checkout.session.completed':
-      const session = event.data.object;
-      console.log('Session data:', JSON.stringify(session, null, 2));
-      
-      // Validasi data yang diperlukan
-      if (!session.metadata?.userId || !session.metadata?.subscriptionType) {
-        console.error('Missing required metadata:', session.metadata);
-        return res.status(400).send('Missing required metadata');
+    // Cek transaksi
+    const transaction = await prisma.transaction.findFirst({
+      where: { order_id },
+      include: {
+        user: true
       }
+    });
 
+    if (!transaction) {
+      return errorResponse(res, "Transaction not found", 404);
+    }
+
+    // Jika transaksi sudah SUCCESS, jangan proses lagi
+    if (transaction.status === "SUCCESS") {
+      return successResponse(res, "Transaction already processed", 200);
+    }
+
+    let status;
+    if (transaction_status == "capture") {
+      status = fraud_status == "accept" ? "SUCCESS" : "CHALLENGE";
+    } else if (transaction_status == "settlement") {
+      status = "SUCCESS";
+    } else if (["cancel", "deny", "expire"].includes(transaction_status)) {
+      status = "FAILED";
+    } else if (transaction_status == "pending") {
+      status = "PENDING";
+    }
+
+    // Jika akan menjadi SUCCESS, proses pembayaran
+    if (status === "SUCCESS") {
       try {
-        // Reset kredit jika subscription sebelumnya sudah expired
-        await resetExpiredSubscriptionCredits(session.metadata.userId);
+        await prisma.$transaction(async (prisma) => {
+          // Reset kredit jika subscription sebelumnya sudah expired
+          await resetExpiredSubscriptionCredits(transaction.user_id);
 
-        // Update transaction status
-        const transaction = await prisma.transaction.update({
-          where: { order_id: session.id },
-          data: { 
-            status: "SUCCESS",
-            payment_intent_id: session.payment_intent,
-            payment_details: session
-          },
-        });
-
-        console.log('Transaction updated:', transaction);
-
-        // Update user subscription
-        const subscriptionEndDate = new Date();
-        subscriptionEndDate.setMonth(subscriptionEndDate.getMonth() + 1); // Tambah 1 bulan
-
-        const user = await prisma.user.update({
-          where: { id: session.metadata.userId },
-          data: { 
-            subscription_level: parseInt(session.metadata.subscriptionType),
-            stripe_customer_id: session.customer || null,
-            stripe_subscription_id: session.subscription || null,
-            subscription_expire_date: subscriptionEndDate,
-            ai_credit: 999999999,
-            tts_credit: 999999999
-          },
-        });
-
-        // Jika ada referral code dan pembayaran berhasil
-        if (session.metadata.referralCode) {
-          const referrer = await prisma.user.findUnique({
-            where: { referral_code: session.metadata.referralCode }
+          // Update transaction status
+          await prisma.transaction.update({
+            where: { id: transaction.id },
+            data: { 
+              status,
+              payment_details: {
+                ...transaction.payment_details,
+                transaction_status,
+                fraud_status
+              }
+            },
           });
 
-          if (referrer) {
-            // Berikan bonus kredit AI kepada referrer
-            await prisma.user.update({
-              where: { id: referrer.id },
-              data: {
-                ai_credit: {
-                  increment: 50 // Bonus 50 kredit AI
-                },
-                tts_credit: {
-                  increment: 50 // Bonus 50 kredit TTS
-                }
-              }
+          // Update user subscription
+          const subscriptionEndDate = new Date();
+          subscriptionEndDate.setMonth(subscriptionEndDate.getMonth() + 1); // Tambah 1 bulan
+
+          await prisma.user.update({
+            where: { id: transaction.user_id },
+            data: { 
+              subscription_level: transaction.subscription_type,
+              subscription_expire_date: subscriptionEndDate,
+              ai_credit: 999999999,
+              tts_credit: 999999999
+            },
+          });
+
+          // Jika ada referral code dan pembayaran berhasil
+          if (transaction.payment_details.metadata?.referralCode) {
+            const referrer = await prisma.user.findUnique({
+              where: { referral_code: transaction.payment_details.metadata.referralCode }
             });
 
-            // Catat referral
-            await prisma.referral.create({
-              data: {
-                referral_code: session.metadata.referralCode,
-                giver_id: referrer.id,
-                user_id: session.metadata.userId,
-                credit_type: "AI_CHAT",
-                credits_earned: 50,
-                transaction_id: transaction.id
-              }
-            });
+            if (referrer) {
+              // Berikan bonus kredit AI kepada referrer
+              await prisma.user.update({
+                where: { id: referrer.id },
+                data: {
+                  ai_credit: {
+                    increment: 50 // Bonus 50 kredit AI
+                  },
+                  tts_credit: {
+                    increment: 50 // Bonus 50 kredit TTS
+                  }
+                }
+              });
+
+              // Catat referral
+              await prisma.referral.create({
+                data: {
+                  referral_code: transaction.payment_details.metadata.referralCode,
+                  giver_id: referrer.id,
+                  user_id: transaction.user_id,
+                  credit_type: "AI_CHAT",
+                  credits_earned: 50,
+                  transaction_id: transaction.id
+                }
+              });
+            }
+          }
+        });
+      } catch (transactionError) {
+        throw transactionError;
+      }
+    } else {
+      // Update status untuk non-SUCCESS
+      await prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { 
+          status,
+          payment_details: {
+            ...transaction.payment_details,
+            transaction_status,
+            fraud_status
           }
         }
+      });
+    }
 
-        console.log('User subscription updated:', user);
-        break;
-      } catch (error) {
-        console.error('Database update failed:', error);
-        return res.status(500).send('Failed to update database');
-      }
-
-    default:
-      console.log(`Unhandled event type ${event.type}`);
+    return successResponse(res, "Callback processed", 200);
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    return errorResponse(res, error.message, 500);
   }
-
-  res.status(200).end();
 };
 
 export const getStatus = async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const { token } = req.params;
 
     const transaction = await prisma.transaction.findFirst({
-      where: { payment_intent_id: sessionId },
+      where: { snap_token: token },
     });
 
     if (!transaction) {
@@ -277,32 +304,96 @@ export const getStatus = async (req, res) => {
       return errorResponse(res, "Unauthorized", 403);
     }
 
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    let status = transaction.status;
-
-    if (session.payment_status === "paid") {
-      status = "SUCCESS";
-    } else if (session.status === "open") {
-      status = "PENDING";
-    } else {
-      status = "FAILED";
-    }
-
-    if (status !== transaction.status) {
-      await prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status },
+    // Jika transaksi sudah SUCCESS, langsung kembalikan status
+    if (transaction.status === "SUCCESS") {
+      return successResponse(res, "Payment status retrieved", 200, {
+        transaction_id: transaction.id,
+        order_id: transaction.order_id,
+        status: transaction.status,
+        payment_details: transaction.payment_details,
       });
     }
 
-    return successResponse(res, "Payment status retrieved", 200, {
-      transaction_id: transaction.id,
-      order_id: transaction.order_id,
-      status: status,
-      payment_details: session
-    });
+    try {
+      // Cek status transaksi menggunakan midtrans-client
+      const statusData = await snap.transaction.notification(token);
+      let status = transaction.status;
+
+      if (
+        statusData.transaction_status === "settlement" ||
+        statusData.transaction_status === "capture"
+      ) {
+        // Hanya proses jika status sebelumnya bukan SUCCESS
+        if (transaction.status !== "SUCCESS") {
+          status = "SUCCESS";
+          await prisma.$transaction(async (prisma) => {
+            // Reset kredit jika subscription sebelumnya sudah expired
+            await resetExpiredSubscriptionCredits(transaction.user_id);
+
+            // Update transaction status
+            await prisma.transaction.update({
+              where: { id: transaction.id },
+              data: { 
+                status,
+                payment_details: {
+                  ...transaction.payment_details,
+                  ...statusData
+                }
+              },
+            });
+
+            // Update user subscription
+            const subscriptionEndDate = new Date();
+            subscriptionEndDate.setMonth(subscriptionEndDate.getMonth() + 1);
+
+            await prisma.user.update({
+              where: { id: transaction.user_id },
+              data: { 
+                subscription_level: transaction.subscription_type,
+                subscription_expire_date: subscriptionEndDate,
+                ai_credit: 999999999,
+                tts_credit: 999999999
+              },
+            });
+          });
+        }
+      } else if (statusData.transaction_status === "pending") {
+        status = "PENDING";
+      } else if (
+        ["deny", "cancel", "expire"].includes(statusData.transaction_status)
+      ) {
+        status = "FAILED";
+      }
+
+      // Update status hanya jika bukan SUCCESS
+      if (status !== transaction.status && status !== "SUCCESS") {
+        await prisma.transaction.update({
+          where: { id: transaction.id },
+          data: { 
+            status,
+            payment_details: {
+              ...transaction.payment_details,
+              ...statusData
+            }
+          },
+        });
+      }
+
+      return successResponse(res, "Payment status retrieved", 200, {
+        transaction_id: transaction.id,
+        order_id: transaction.order_id,
+        status: status,
+        payment_details: transaction.payment_details,
+      });
+    } catch (midtransError) {
+      return successResponse(res, "Payment status retrieved from database", 200, {
+        transaction_id: transaction.id,
+        order_id: transaction.order_id,
+        status: transaction.status,
+        payment_details: transaction.payment_details,
+      });
+    }
   } catch (error) {
-    console.error("Get status error:", error);
     return errorResponse(res, error.message, 500);
   }
 };
@@ -327,13 +418,9 @@ export const getPendingTransaction = async (req, res) => {
       return errorResponse(res, "No pending transaction found", 404);
     }
 
-    const session = await stripe.checkout.sessions.retrieve(
-      pendingTransaction.payment_intent_id
-    );
-
     return successResponse(res, "Pending transaction found", 200, {
-      sessionId: session.id,
-      url: session.url
+      token: pendingTransaction.snap_token,
+      redirect_url: pendingTransaction.payment_details.redirect_url
     });
   } catch (error) {
     console.error("Get pending transaction error:", error);
@@ -346,8 +433,7 @@ export const getSubscriptionPlans = async (req, res) => {
     const plans = {
       1: { 
         name: "Pro Plan", 
-        price: 9.90, 
-        priceId: process.env.STRIPE_PRO_PRICE_ID,
+        price: 9.90,
         description: "Full access to all premium features",
         features: [
           "Unlimited books",
@@ -361,8 +447,7 @@ export const getSubscriptionPlans = async (req, res) => {
       },
       2: { 
         name: "Premium Plan", 
-        price: 17.90, 
-        priceId: process.env.STRIPE_PREMIUM_PRICE_ID,
+        price: 17.90,
         description: "Save 20% with annual subscription",
         features: [
           "All Premium features",
