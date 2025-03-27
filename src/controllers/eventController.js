@@ -1,6 +1,8 @@
 import { errorResponse } from "../libs/errorResponse.js";
 import { successResponse } from "../libs/successResponse.js";
 import prisma from "../utils/prisma.js";
+import { uploadToS3, deleteFromS3, getKeyFromUrl } from "../utils/s3Config.js";
+import path from "path";
 
 export const createEvent = async (req, res) => {
     const { title, link, active, order } = req.body;
@@ -10,10 +12,15 @@ export const createEvent = async (req, res) => {
     }
 
     try {
+        // Upload gambar ke S3
+        const fileExtension = path.extname(req.file.originalname);
+        const imageKey = `events/event-${Date.now()}-${Math.round(Math.random() * 1E9)}${fileExtension}`;
+        const imageUrl = await uploadToS3(req.file.buffer, imageKey);
+
         const event = await prisma.event.create({
             data: {
                 title,
-                image_url: `/uploads/events/${req.file.filename}`,
+                image_url: imageUrl,
                 link,
                 active: active === "true" || active === true,
                 order: order ? parseInt(order) : 0
@@ -101,8 +108,26 @@ export const updateEvent = async (req, res) => {
             order: order ? parseInt(order) : event.order
         };
 
+        // Jika ada gambar baru, upload ke S3 dan hapus yang lama
         if (req.file) {
-            updateData.image_url = `/uploads/events/${req.file.filename}`;
+            // Hapus gambar lama dari S3 jika ada
+            if (event.image_url) {
+                const oldImageKey = getKeyFromUrl(event.image_url);
+                if (oldImageKey) {
+                    try {
+                        await deleteFromS3(oldImageKey);
+                    } catch (error) {
+                        console.error("Error deleting old event image:", error);
+                    }
+                }
+            }
+
+            // Upload gambar baru ke S3
+            const fileExtension = path.extname(req.file.originalname);
+            const imageKey = `events/event-${Date.now()}-${Math.round(Math.random() * 1E9)}${fileExtension}`;
+            const imageUrl = await uploadToS3(req.file.buffer, imageKey);
+            
+            updateData.image_url = imageUrl;
         }
 
         const updatedEvent = await prisma.event.update({
@@ -126,6 +151,18 @@ export const deleteEvent = async (req, res) => {
 
         if (!event) {
             return errorResponse(res, "Event tidak ditemukan", 404);
+        }
+
+        // Hapus gambar dari S3 jika ada
+        if (event.image_url) {
+            const imageKey = getKeyFromUrl(event.image_url);
+            if (imageKey) {
+                try {
+                    await deleteFromS3(imageKey);
+                } catch (error) {
+                    console.error("Error deleting event image:", error);
+                }
+            }
         }
 
         await prisma.event.delete({
