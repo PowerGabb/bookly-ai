@@ -5,10 +5,10 @@ npm-debug.log
 .gitignore 
 
 
-/uploads/audio
-/uploads/audios
-/uploads/avatars
-/uploads/covers
-/uploads/events
-/uploads/processed
-/uploads/waiting-process
+/uploads/audio/*
+/uploads/audios/*
+/uploads/avatars/*
+/uploads/covers/*
+/uploads/events/*
+/uploads/processed/*
+/uploads/waiting-process/*
