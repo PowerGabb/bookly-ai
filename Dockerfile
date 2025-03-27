@@ -27,15 +27,6 @@ COPY . .
 # Generate Prisma client
 RUN npx prisma generate
 
-# Buat script init.sh executable
-RUN chmod +x /app/init.sh
-
-# Buat direktori uploads dan subdirektorinya
-RUN mkdir -p /app/uploads/covers /app/uploads/waiting-process
-
-# Set permission yang tepat
-RUN chmod -R 777 /app/uploads
-
 EXPOSE 3000
 
-CMD ["/app/init.sh"] 
+CMD ["npm", "start"] 
