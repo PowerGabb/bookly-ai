@@ -92,16 +92,21 @@ export const createBook = async (req, res) => {
             return errorResponse(res, "Buku dengan judul atau ISBN yang sama sudah ada", 400);
         }
 
-        // Proses file buku
-        const fileExtension = path.extname(bookFile.originalname);
-        const newFileName = `${bookFile.filename}${fileExtension}`;
-        const uploadDir = path.join("uploads", "waiting-process");
-        const newFilePath = path.join(uploadDir, newFileName);
-
         // Buat direktori jika belum ada
+        const uploadDir = path.join(process.cwd(), "uploads", "waiting-process");
+        const coverDir = path.join(process.cwd(), "uploads", "covers");
+        
         if (!fs.existsSync(uploadDir)) {
             fs.mkdirSync(uploadDir, { recursive: true });
         }
+        if (!fs.existsSync(coverDir)) {
+            fs.mkdirSync(coverDir, { recursive: true });
+        }
+
+        // Proses file buku
+        const fileExtension = path.extname(bookFile.originalname);
+        const newFileName = `${bookFile.filename}${fileExtension}`;
+        const newFilePath = path.join(uploadDir, newFileName);
 
         // Pindahkan file buku
         fs.renameSync(bookFile.path, newFilePath);
@@ -109,10 +114,6 @@ export const createBook = async (req, res) => {
         // Proses cover image jika ada
         let coverImagePath = null;
         if (coverFile) {
-            const coverDir = path.join("uploads", "covers");
-            if (!fs.existsSync(coverDir)) {
-                fs.mkdirSync(coverDir, { recursive: true });
-            }
             coverImagePath = `/uploads/covers/${coverFile.filename}`;
         }
 
