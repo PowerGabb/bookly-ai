@@ -3,45 +3,20 @@ import { createBook, getBook, getBookById, getPages, updateBook, deleteBook, get
 import multer from "multer";
 import { isAuth } from "../middleware/isAuth.js";
 import path from "path";
+import { coverImageStorage, bookFileStorage, bookFileFilter, imageFileFilter } from "../utils/s3Config.js";
 
 const bookRoutes = express.Router();
 
-// Konfigurasi multer untuk menyimpan file
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
+// Konfigurasi multer untuk menggunakan S3
+const upload = multer({
+    storage: multer.memoryStorage(), // Gunakan memory storage untuk fleksibilitas
+    fileFilter: (req, file, cb) => {
         if (file.fieldname === "coverImage") {
-            cb(null, "uploads/covers/");
+            imageFileFilter(req, file, cb);
         } else {
-            cb(null, "uploads/");
-        }
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-
-const fileFilter = (req, file, cb) => {
-    if (file.fieldname === "coverImage") {
-        // Hanya izinkan file gambar untuk cover
-        if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Hanya file gambar yang diizinkan untuk cover!'), false);
-        }
-    } else {
-        // Untuk file buku (PDF/EPUB)
-        if (file.mimetype === "application/pdf" || file.mimetype === "application/epub+zip") {
-            cb(null, true);
-        } else {
-            cb(new Error('Format file tidak valid. Hanya PDF dan EPUB yang diizinkan!'), false);
+            bookFileFilter(req, file, cb);
         }
     }
-};
-
-const upload = multer({ 
-    storage: storage,
-    fileFilter: fileFilter
 });
 
 const uploadFields = upload.fields([

@@ -14,6 +14,7 @@
   "description": "",
   "dependencies": {
     "@prisma/client": "^6.2.1",
+    "aws-sdk": "^2.1692.0",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.3",
@@ -26,6 +27,7 @@
     "jsonwebtoken": "^9.0.2",
     "midtrans-client": "^1.4.2",
     "multer": "^1.4.5-lts.1",
+    "multer-s3": "^3.0.1",
     "nodemailer": "^6.10.0",
     "nodemon": "^3.1.9",
     "office-text-extractor": "^3.0.3",

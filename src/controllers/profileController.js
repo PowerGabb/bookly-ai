@@ -6,6 +6,7 @@ import { successResponse } from '../libs/successResponse.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { avatarStorage, uploadToS3, deleteFromS3, getKeyFromUrl } from '../utils/s3Config.js';
 
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -67,25 +68,19 @@ const sendOTP = async (phone, otp) => {
   }
 };
 
-// Konfigurasi multer untuk upload avatar
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = 'uploads/avatars';
-    // Buat direktori jika belum ada
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+// Gunakan S3 untuk upload avatar
+export const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Hanya file gambar yang diizinkan!'), false);
     }
-    cb(null, uploadDir);
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname));
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
   }
-});
-
-
-export const upload = multer({ 
-  storage: storage,
 });
 
 export const updateProfile = async (req, res) => {
@@ -99,12 +94,26 @@ export const updateProfile = async (req, res) => {
       where: { id: userId }
     });
 
-    // Jika ada avatar baru dan user sudah punya avatar sebelumnya, hapus file lama
-    if (avatarFile && currentUser.avatar_url) {
-      const oldAvatarPath = path.join(process.cwd(), currentUser.avatar_url);
-      if (fs.existsSync(oldAvatarPath)) {
-        fs.unlinkSync(oldAvatarPath);
+    let avatarUrl = currentUser.avatar_url;
+
+    // Jika ada avatar baru, upload ke S3 dan hapus yang lama jika ada
+    if (avatarFile) {
+      // Hapus avatar lama dari S3 jika ada
+      if (currentUser.avatar_url) {
+        const oldAvatarKey = getKeyFromUrl(currentUser.avatar_url);
+        if (oldAvatarKey) {
+          try {
+            await deleteFromS3(oldAvatarKey);
+          } catch (error) {
+            console.error("Error deleting old avatar:", error);
+          }
+        }
       }
+
+      // Upload avatar baru ke S3
+      const fileExtension = path.extname(avatarFile.originalname);
+      const avatarKey = `avatars/avatar-${Date.now()}-${Math.round(Math.random() * 1E9)}${fileExtension}`;
+      avatarUrl = await uploadToS3(avatarFile.buffer, avatarKey);
     }
 
     // Update user dengan avatar baru jika ada
@@ -113,9 +122,7 @@ export const updateProfile = async (req, res) => {
       data: {
         name,
         email,
-        ...(avatarFile && {
-          avatar_url: `/${avatarFile.path.replace(/\\/g, '/')}` // Konversi path untuk URL
-        })
+        ...(avatarFile && { avatar_url: avatarUrl })
       },
     });
 
@@ -125,10 +132,6 @@ export const updateProfile = async (req, res) => {
     });
 
   } catch (error) {
-    // Jika ada error dan file sudah terupload, hapus file
-    if (req.file) {
-      fs.unlinkSync(req.file.path);
-    }
     return errorResponse(res, error.message, 500);
   }
 };

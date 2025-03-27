@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import axios from "axios";
+import { uploadToS3, deleteFromS3, getKeyFromUrl } from "../utils/s3Config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -344,21 +345,18 @@ export const textToSpeech = async (req, res) => {
     });
 
     const buffer = Buffer.from(await audioResponse.arrayBuffer());
-    const audioFileName = `audio_${bookId}_${pageNumber}_${language}_${Date.now()}.mp3`;
-    const audioPath = path.join("uploads", "audios", audioFileName);
     
-    if (!fs.existsSync(path.join("uploads", "audios"))) {
-      fs.mkdirSync(path.join("uploads", "audios"), { recursive: true });
-    }
-
-    fs.writeFileSync(audioPath, buffer);
+    // Upload audio ke S3
+    const audioFileName = `audio_${bookId}_${pageNumber}_${language}_${Date.now()}.mp3`;
+    const audioKey = `audios/${audioFileName}`;
+    const audioUrl = await uploadToS3(buffer, audioKey);
 
     const audioRecord = await prisma.bookAudio.create({
       data: {
         user_id: userId,
         book_id: parseInt(bookId),
         page_number: parseInt(pageNumber),
-        file_url: `/uploads/audios/${audioFileName}`,
+        file_url: audioUrl,
         voice: speaker,
         style: style,
         language: language,

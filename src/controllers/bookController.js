@@ -8,6 +8,8 @@ import { readFile } from 'node:fs/promises';
 import sharp from "sharp";
 import { createRequire } from 'module';
 import OpenAI from "openai";
+import { uploadToS3, deleteFromS3, getKeyFromUrl } from "../utils/s3Config.js";
+import axios from "axios";
 const require = createRequire(import.meta.url);
 const pdfImgConvert = require('pdf-img-convert');
 
@@ -92,29 +94,17 @@ export const createBook = async (req, res) => {
             return errorResponse(res, "Buku dengan judul atau ISBN yang sama sudah ada", 400);
         }
 
-        // Buat direktori jika belum ada
-        const uploadDir = path.join(process.cwd(), "uploads", "waiting-process");
-        const coverDir = path.join(process.cwd(), "uploads", "covers");
-        
-        // Pastikan direktori ada dengan recursive
-        fs.mkdirSync(uploadDir, { recursive: true });
-        fs.mkdirSync(coverDir, { recursive: true });
-
-        // Proses file buku
+        // Upload file buku ke S3
         const fileExtension = path.extname(bookFile.originalname);
-        const newFileName = `${bookFile.filename}${fileExtension}`;
-        const newFilePath = path.join(uploadDir, newFileName);
+        const bookKey = `books/${Date.now()}-${Math.round(Math.random() * 1E9)}${fileExtension}`;
+        const bookUrl = await uploadToS3(bookFile.buffer, bookKey);
 
-        // Pindahkan file buku
-        fs.renameSync(bookFile.path, newFilePath);
-
-        // Proses cover image jika ada
+        // Upload cover image ke S3 jika ada
         let coverImagePath = null;
         if (coverFile) {
-            const coverFileName = `${coverFile.filename}${path.extname(coverFile.originalname)}`;
-            const coverFilePath = path.join(coverDir, coverFileName);
-            fs.renameSync(coverFile.path, coverFilePath);
-            coverImagePath = `/uploads/covers/${coverFileName}`;
+            const coverExtension = path.extname(coverFile.originalname);
+            const coverKey = `covers/${Date.now()}-${Math.round(Math.random() * 1E9)}${coverExtension}`;
+            coverImagePath = await uploadToS3(coverFile.buffer, coverKey);
         }
 
         const book = await prisma.book.create({
@@ -128,7 +118,7 @@ export const createBook = async (req, res) => {
                 language,
                 pageCount: pageCount ? parseInt(pageCount) : null,
                 coverImage: coverImagePath,
-                file_url: `/uploads/waiting-process/${newFileName}`,
+                file_url: bookUrl,
                 ...(categoryIds && categoryIds.length > 0 ? {
                     categories: {
                         create: categoryIds.map(id => ({
@@ -158,7 +148,7 @@ export const createBook = async (req, res) => {
         // Mulai proses konversi PDF ke gambar
         if (fileExtension.toLowerCase() === '.pdf') {
             setImmediate(() => {
-                processBookPages(book.id, book.title, newFilePath);
+                processBookPages(book.id, book.title, book.file_url);
             });
         }
 
@@ -193,16 +183,23 @@ export const updateBook = async (req, res) => {
         // Handle cover image update
         let coverImagePath = existingBook.coverImage;
         if (req.files && req.files.coverImage) {
-            // Hapus cover lama jika ada
+            // Hapus cover lama dari S3 jika ada
             if (existingBook.coverImage) {
-                const oldCoverPath = path.join(process.cwd(), existingBook.coverImage);
-                if (fs.existsSync(oldCoverPath)) {
-                    fs.unlinkSync(oldCoverPath);
+                const oldCoverKey = getKeyFromUrl(existingBook.coverImage);
+                if (oldCoverKey) {
+                    try {
+                        await deleteFromS3(oldCoverKey);
+                    } catch (error) {
+                        console.error("Error deleting old cover:", error);
+                    }
                 }
             }
 
-            // Set path cover baru
-            coverImagePath = `/uploads/covers/${req.files.coverImage[0].filename}`;
+            // Upload cover baru ke S3
+            const coverFile = req.files.coverImage[0];
+            const coverExtension = path.extname(coverFile.originalname);
+            const coverKey = `covers/${Date.now()}-${Math.round(Math.random() * 1E9)}${coverExtension}`;
+            coverImagePath = await uploadToS3(coverFile.buffer, coverKey);
         }
 
         let updateData = {
@@ -241,19 +238,16 @@ export const updateBook = async (req, res) => {
         // Handle book file update
         if (req.files && req.files.bookFile) {
             const bookFile = req.files.bookFile[0];
-            // Hapus file PDF lama jika masih ada
+            
+            // Hapus file PDF lama dari S3 jika masih ada
             if (existingBook.file_url) {
-                const oldPdfPath = path.join(process.cwd(), existingBook.file_url);
-                if (fs.existsSync(oldPdfPath)) {
-                    fs.unlinkSync(oldPdfPath);
-                }
-            }
-
-            // Hapus folder processed lama jika ada
-            if (existingBook.processed_dir) {
-                const oldProcessedDir = path.join(process.cwd(), existingBook.processed_dir);
-                if (fs.existsSync(oldProcessedDir)) {
-                    fs.rmSync(oldProcessedDir, { recursive: true, force: true });
+                const oldFileKey = getKeyFromUrl(existingBook.file_url);
+                if (oldFileKey) {
+                    try {
+                        await deleteFromS3(oldFileKey);
+                    } catch (error) {
+                        console.error("Error deleting old file:", error);
+                    }
                 }
             }
 
@@ -262,23 +256,15 @@ export const updateBook = async (req, res) => {
                 where: { book_id: parseInt(bookId) }
             });
 
-            // Proses file baru
+            // Upload file baru ke S3
             const fileExtension = path.extname(bookFile.originalname);
-            const newFileName = `${bookFile.filename}${fileExtension}`;
-            const newFilePath = path.join(uploadDir, newFileName);
-
-            // Buat direktori jika belum ada
-            if (!fs.existsSync(uploadDir)) {
-                fs.mkdirSync(uploadDir, { recursive: true });
-            }
-
-            // Pindahkan file baru
-            fs.renameSync(bookFile.path, newFilePath);
+            const bookKey = `books/${Date.now()}-${Math.round(Math.random() * 1E9)}${fileExtension}`;
+            const bookUrl = await uploadToS3(bookFile.buffer, bookKey);
 
             // Tambahkan informasi file baru ke data update
             updateData = {
                 ...updateData,
-                file_url: `/uploads/waiting-process/${newFileName}`,
+                file_url: bookUrl,
                 processed: false,
                 processed_dir: null,
                 error_message: null
@@ -301,7 +287,7 @@ export const updateBook = async (req, res) => {
         // Jika ada file baru dan itu PDF, mulai proses konversi
         if (req.files && req.files.bookFile && path.extname(req.files.bookFile[0].originalname).toLowerCase() === '.pdf') {
             setImmediate(() => {
-                processBookPages(updatedBook.id, updatedBook.title, path.join(uploadDir, newFileName));
+                processBookPages(updatedBook.id, updatedBook.title, updatedBook.file_url);
             });
         }
 
@@ -314,15 +300,23 @@ export const updateBook = async (req, res) => {
     }
 }
 
-const processBookPages = async (bookId, bookTitle, pdfPath) => {
+const processBookPages = async (bookId, bookTitle, fileUrl) => {
     try {
         console.log(`[${bookTitle}] Starting PDF processing...`);
 
         // Buat instance TextExtractor
         const extractor = getTextExtractor();
 
-        // Baca file PDF sebagai buffer
-        const buffer = await readFile(pdfPath);
+        // Dapatkan file dari S3 atau HTTP URL
+        let buffer;
+        if (fileUrl.startsWith('http')) {
+            // Jika URL adalah URL dari S3 atau HTTP lainnya
+            const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+            buffer = Buffer.from(response.data);
+        } else {
+            // Bila masih menggunakan path lokal (untuk backward compatibility)
+            buffer = await readFile(fileUrl);
+        }
 
         // Ekstrak teks dari buffer PDF
         const text = await extractor.extractText({ input: buffer, type: 'buffer' });
@@ -361,11 +355,6 @@ const processBookPages = async (bookId, bookTitle, pdfPath) => {
                 processed_dir: null
             }
         });
-
-        // Hapus file PDF original
-        if (fs.existsSync(pdfPath)) {
-            fs.unlinkSync(pdfPath);
-        }
 
     } catch (error) {
         console.error(`[${bookTitle}] Error processing book:`, error);
@@ -611,19 +600,27 @@ export const deleteBook = async (req, res) => {
             return errorResponse(res, "Buku tidak ditemukan", 404);
         }
 
-        // Hapus file PDF jika masih ada
+        // Hapus file buku dari S3 jika ada
         if (book.file_url) {
-            const pdfPath = path.join(process.cwd(), book.file_url);
-            if (fs.existsSync(pdfPath)) {
-                fs.unlinkSync(pdfPath);
+            const fileKey = getKeyFromUrl(book.file_url);
+            if (fileKey) {
+                try {
+                    await deleteFromS3(fileKey);
+                } catch (error) {
+                    console.error("Error deleting book file:", error);
+                }
             }
         }
 
-        // Hapus folder processed jika ada
-        if (book.processed_dir) {
-            const processedDir = path.join(process.cwd(), book.processed_dir);
-            if (fs.existsSync(processedDir)) {
-                fs.rmSync(processedDir, { recursive: true, force: true });
+        // Hapus cover image dari S3 jika ada
+        if (book.coverImage) {
+            const coverKey = getKeyFromUrl(book.coverImage);
+            if (coverKey) {
+                try {
+                    await deleteFromS3(coverKey);
+                } catch (error) {
+                    console.error("Error deleting cover image:", error);
+                }
             }
         }
 
