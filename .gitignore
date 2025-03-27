@@ -3,8 +3,14 @@ node_modules/*
 .env
 
 /uploads/avatars/*
+!/uploads/avatars/.gitkeep
 /uploads/covers/*
+!/uploads/covers/.gitkeep
 /uploads/processed/*
+!/uploads/processed/.gitkeep
 /uploads/waiting-process/*
+!/uploads/waiting-process/.gitkeep
 /uploads/audios/*
+!/uploads/audios/.gitkeep
 /uploads/events/*
+!/uploads/events/.gitkeep
