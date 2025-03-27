@@ -27,6 +27,9 @@ COPY . .
 # Generate Prisma client
 RUN npx prisma generate
 
+# Buat direktori uploads dan subdirektori yang diperlukan
+RUN mkdir -p uploads/covers uploads/waiting-process
+
 EXPOSE 3000
 
 CMD ["npm", "start"] 

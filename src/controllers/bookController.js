@@ -96,12 +96,9 @@ export const createBook = async (req, res) => {
         const uploadDir = path.join(process.cwd(), "uploads", "waiting-process");
         const coverDir = path.join(process.cwd(), "uploads", "covers");
         
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        if (!fs.existsSync(coverDir)) {
-            fs.mkdirSync(coverDir, { recursive: true });
-        }
+        // Pastikan direktori ada dengan recursive
+        fs.mkdirSync(uploadDir, { recursive: true });
+        fs.mkdirSync(coverDir, { recursive: true });
 
         // Proses file buku
         const fileExtension = path.extname(bookFile.originalname);
@@ -114,7 +111,10 @@ export const createBook = async (req, res) => {
         // Proses cover image jika ada
         let coverImagePath = null;
         if (coverFile) {
-            coverImagePath = `/uploads/covers/${coverFile.filename}`;
+            const coverFileName = `${coverFile.filename}${path.extname(coverFile.originalname)}`;
+            const coverFilePath = path.join(coverDir, coverFileName);
+            fs.renameSync(coverFile.path, coverFilePath);
+            coverImagePath = `/uploads/covers/${coverFileName}`;
         }
 
         const book = await prisma.book.create({
