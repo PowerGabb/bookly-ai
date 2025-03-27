@@ -9,5 +9,9 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - HOST=0.0.0.0
     volumes:
-      - ./uploads:/app/uploads
+      - /mnt/data:/app/uploads
     restart: unless-stopped
+
+volumes:
+  bookly_uploads:
+    name: bookly_uploads

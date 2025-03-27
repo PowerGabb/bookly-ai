@@ -5,7 +5,7 @@ import { successResponse } from "../libs/successResponse.js";
 
 // Inisialisasi Snap
 let snap = new midtransClient.Snap({
-  isProduction: false,
+  isProduction: process.env.MIDTRANS_IS_PRODUCTION ? process.env.MIDTRANS_IS_PRODUCTION === "true" : true,
   serverKey: process.env.MIDTRANS_SERVER_KEY,
   clientKey: process.env.MIDTRANS_CLIENT_KEY,
 });
