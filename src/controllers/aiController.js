@@ -281,17 +281,105 @@ export const getChatHistory = async (req, res) => {
   }
 };
 
+const getSystemPromptForLanguage = (language) => {
+  const prompts = {
+    en: `You are an AI specialized in converting books into high-quality audiobooks.
+         Optimize the following text to make it sound natural and engaging when read aloud in English.
+         Add appropriate punctuation, adjust sentence flow, and ensure a smooth, expressive narration.
+         Maintain the original meaning while enhancing the listening experience.`,
+    in: `Anda adalah AI yang mengonversi buku menjadi audiobook berkualitas tinggi.
+         Optimalkan teks berikut agar terdengar natural dan menarik saat dibacakan dalam Bahasa Indonesia.
+         Tambahkan tanda baca yang sesuai, sesuaikan alur kalimat, dan pastikan narasi terdengar lancar serta ekspresif.
+         Pertahankan makna asli sambil meningkatkan pengalaman mendengarkan.`,
+    ja: `あなたは本を高品質のオーディオブックに変換するAIです。
+         以下のテキストを、日本語で自然で魅力的に朗読できるように最適化してください。
+         適切な句読点を追加し、文の流れを調整し、滑らかで表現豊かなナレーションを実現してください。
+         元の意味を保ちながら、聞きやすさを向上させてください。`,
+    ko: `당신은 책을 고품질 오디오북으로 변환하는 AI입니다.
+         다음 텍스트를 한국어로 자연스럽고 몰입감 있게 들리도록 최적화하세요.
+         적절한 구두점을 추가하고 문장 흐름을 조정하며, 부드럽고 표현력 있는 내레이션을 보장하세요.
+         원래 의미를 유지하면서도 청취 경험을 향상시키세요.`,
+    zh: `您是将书籍转换为高质量有声书的人工智能。
+         优化以下文本，使其在朗读时听起来自然、生动且引人入胜。
+         添加适当的标点符号，调整句子流畅度，并确保叙述具有表现力。
+         在保持原意的同时，提高听觉体验。`,
+    de: `Sie sind eine KI, die Bücher in hochwertige Hörbücher umwandelt.
+         Optimieren Sie den folgenden Text, damit er beim Vorlesen auf Deutsch natürlich und fesselnd klingt.
+         Fügen Sie geeignete Satzzeichen hinzu, passen Sie den Satzfluss an und sorgen Sie für eine flüssige und ausdrucksstarke Erzählweise.
+         Bewahren Sie die ursprüngliche Bedeutung, während Sie das Hörerlebnis verbessern.`,
+    fr: `Vous êtes une IA spécialisée dans la conversion de livres en livres audio de haute qualité.
+         Optimisez le texte suivant pour qu'il sonne naturel et captivant lorsqu'il est lu à haute voix en français.
+         Ajoutez la ponctuation appropriée, ajustez le flux des phrases et assurez-vous d'une narration fluide et expressive.
+         Préservez le sens original tout en améliorant l'expérience d'écoute.`,
+    es: `Eres una IA especializada en convertir libros en audiolibros de alta calidad.
+         Optimiza el siguiente texto para que suene natural y atractivo cuando se lea en voz alta en español.
+         Agrega la puntuación adecuada, ajusta el flujo de las oraciones y garantiza una narración fluida y expresiva.
+         Mantén el significado original mientras mejoras la experiencia auditiva.`,
+    it: `Sei un'IA specializzata nella conversione di libri in audiolibri di alta qualità.
+         Ottimizza il seguente testo affinché suoni naturale e coinvolgente quando letto ad alta voce in italiano.
+         Aggiungi la punteggiatura appropriata, adatta il flusso delle frasi e garantisci una narrazione fluida ed espressiva.
+         Mantieni il significato originale migliorando al contempo l'esperienza d'ascolto.`,
+    nl: `U bent een AI die boeken omzet in hoogwaardige audioboeken.
+         Optimaliseer de volgende tekst zodat deze natuurlijk en boeiend klinkt wanneer hij in het Nederlands wordt voorgelezen.
+         Voeg de juiste interpunctie toe, pas de zinsstructuur aan en zorg voor een vloeiende en expressieve vertelling.
+         Behoud de oorspronkelijke betekenis terwijl u de luisterervaring verbetert.`,
+    ru: `Вы — ИИ, который превращает книги в качественные аудиокниги.
+         Оптимизируйте следующий текст, чтобы он звучал естественно и увлекательно при чтении вслух на русском языке.
+         Добавьте подходящую пунктуацию, настройте плавность предложений и обеспечьте выразительную, гладкую подачу.
+         Сохраните оригинальный смысл, улучшая восприятие на слух.`,
+    ar: `أنت ذكاء اصطناعي متخصص في تحويل الكتب إلى كتب صوتية عالية الجودة.
+         قم بتحسين النص التالي ليبدو طبيعيًا وجذابًا عند قراءته بصوت عالٍ باللغة العربية.
+         أضف علامات الترقيم المناسبة، وقم بضبط تدفق الجمل، وتأكد من أن السرد سلس ومعبر.
+         حافظ على المعنى الأصلي مع تحسين تجربة الاستماع.`,
+    hi: `आप एक एआई हैं जो किताबों को उच्च-गुणवत्ता वाले ऑडियोबुक में बदलने में विशेषज्ञ हैं।
+         निम्नलिखित पाठ को इस तरह अनुकूलित करें कि यह हिंदी में पढ़ने पर स्वाभाविक और आकर्षक लगे।
+         उचित विराम चिह्न जोड़ें, वाक्य प्रवाह को समायोजित करें, और सुनिश्चित करें कि वाचन सहज और प्रभावशाली हो।
+         मूल अर्थ बनाए रखते हुए सुनने के अनुभव को बेहतर बनाएं।`,
+    pt: `Você é uma IA especializada em converter livros em audiolivros de alta qualidade.
+         Otimize o seguinte texto para que soe natural e envolvente ao ser lido em voz alta em português.
+         Adicione a pontuação adequada, ajuste o fluxo das frases e garanta uma narração fluida e expressiva.
+         Mantenha o significado original enquanto melhora a experiência auditiva.`,
+    tr: `Siz, kitapları yüksek kaliteli sesli kitaplara dönüştüren bir yapay zekâsınız.
+         Aşağıdaki metni, Türkçe olarak yüksek sesle okunduğunda doğal ve akıcı hale getirmek için optimize edin.
+         Uygun noktalama işaretlerini ekleyin, cümle akışını ayarlayın ve anlatımı daha etkileyici hale getirin.
+         Orijinal anlamı koruyarak dinleme deneyimini iyileştirin.`
+  };
+  
+  return prompts[language] || prompts.en; // Default ke bahasa Inggris jika bahasa tidak ditemukan
+};
+
 export const textToSpeech = async (req, res) => {
   const {
     bookId,
     pageNumber,
     speaker,
     style = "default",
-    language = "en"  // Default bahasa Inggris
+    language = "en"
   } = req.body;
   const userId = req.user.id;
 
   try {
+    // Cek apakah user adalah premium untuk custom voice
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        subscription_level: true,
+        subscription_expire_date: true
+      }
+    });
+
+    // Jika bukan premium dan mencoba menggunakan voice selain default
+    if (
+      (!user.subscription_level || new Date() > new Date(user.subscription_expire_date)) && 
+      speaker !== 'alloy'
+    ) {
+      return errorResponse(
+        res, 
+        "Fitur custom voice hanya tersedia untuk pengguna premium", 
+        403
+      );
+    }
+
     const page = await prisma.bookPage.findFirst({
       where: {
         book_id: parseInt(bookId),
@@ -311,16 +399,7 @@ export const textToSpeech = async (req, res) => {
       return errorResponse(res, "Halaman tidak ditemukan", 404);
     }
 
-    // Sesuaikan prompt berdasarkan bahasa
-    const systemPrompt = language === "in" 
-      ? `Anda adalah ahli dalam mengoptimalkan teks Bahasa Indonesia untuk dibacakan. 
-         Sesuaikan teks berikut agar lebih natural dan enak didengar dalam Bahasa Indonesia.
-         Tambahkan tanda baca yang sesuai dan perbaiki struktur kalimat jika perlu.
-         Pastikan teks tetap mempertahankan makna aslinya namun lebih mengalir saat dibacakan.`
-      : `You are an expert in optimizing English text for speech.
-         Adjust the following text to make it more natural and pleasant to hear in English.
-         Add appropriate punctuation and improve sentence structure if needed.
-         Ensure the text maintains its original meaning while flowing better when spoken.`;
+    const systemPrompt = getSystemPromptForLanguage(language);
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -391,21 +470,20 @@ export const textToSpeech = async (req, res) => {
 // Update getPageAudios untuk menambahkan filter language
 export const getPageAudios = async (req, res) => {
   const { bookId, pageNumber } = req.params;
-  const { language = "en" } = req.query;  // Default ke bahasa Inggris
+  const { language = "en", voice = "alloy" } = req.query;  // Tambahkan voice parameter
   console.log(req.query);
+  
   try {
     const audios = await prisma.bookAudio.findMany({
       where: {
         book_id: parseInt(bookId),
         page_number: parseInt(pageNumber),
-        language: language
+        language: language,
+        voice: voice // Tambahkan filter untuk voice
       },
       orderBy: [
         {
-          voice: 'asc',
-        },
-        {
-          part: 'asc',
+          created_at: 'desc'
         }
       ],
     });
